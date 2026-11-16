@@ -295,3 +295,142 @@ RARITY_LABEL = {"standard": "СТАНДАРТ", "common": "ОБЫЧНЫЙ", "unc
 RARITY_COLOR = {"standard": "#ffd23f", "common": "#9fb4c4", "uncommon": "#b06aff"}
 
 STAT_NAMES = (("str", "СИЛА", "#ff5a2a"), ("agi", "ЛОВКОСТЬ", "#ffd23f"), ("spd", "СКОРОСТЬ", "#ff8c1a"))
+
+SPECIAL_COMBOS = (("as", "A+S"), ("ws", "W+S"), ("wa", "W+A"), ("wd", "W+D"))
+
+SPECIALS = {
+    "DEADY": [
+        {"name": "ЗАХВАТ СМЕРТИ", "combo": "as", "kind": "grab", "cost": 50,
+         "dmg": 12, "tick": 4, "dur": 2.0,
+         "desc": "Костлявая лапа захватывает врага на 2 с и жмёт урон."},
+        {"name": "ПОЖАТИЕ ДУШИ", "combo": "ws", "kind": "strike", "cost": 100, "dmg": 30,
+         "desc": "Смертельный удар косой — гарантированный крит."},
+    ],
+    "LIGHTY": [
+        {"name": "ПЕРЕГРУЗКА", "combo": "as", "kind": "beam", "cost": 50, "dmg": 20,
+         "desc": "Сгущенный луч тока сквозь всех на линии (присед — уворот)."},
+        {"name": "ГРОЗА", "combo": "ws", "kind": "rain", "cost": 100, "count": 6, "dmg": 12,
+         "desc": "Шесть молний выпадают градом вокруг врага."},
+    ],
+    "EMBERY": [
+        {"name": "ОГНЕННЫЙ ТИФОН", "combo": "as", "kind": "wave", "cost": 50, "count": 4, "dmg": 16,
+         "desc": "Волна огненных столпов вдоль земли."},
+        {"name": "МЕТЕОР", "combo": "ws", "kind": "leap", "cost": 100, "dmg": 26, "radius": 130,
+         "desc": "Прыжок с падением-взрывом по области."},
+    ],
+    "FROSTY": [
+        {"name": "ЛЕДЯНОЙ ПЛЕН", "combo": "as", "kind": "snare", "cost": 50, "dmg": 6, "dur": 1.2,
+         "desc": "Ледяное оковывание сковывает врага на 1.2 с."},
+        {"name": "ЛЕДНИК", "combo": "ws", "kind": "wave", "cost": 100, "count": 5, "dmg": 18,
+         "desc": "Пять ледяных шипов волной из земли."},
+    ],
+    "TOXINY": [
+        {"name": "ЯДОВИТЫЙ ВЫБРОС", "combo": "as", "kind": "poison", "cost": 50, "pct": 12, "dur": 4.0,
+         "desc": "Облако яда: 12% макс. HP за 4 с."},
+        {"name": "ЧУМА", "combo": "ws", "kind": "rain", "cost": 100, "count": 5, "dmg": 10,
+         "desc": "Град ядовитых капль вокруг врага."},
+    ],
+    "SHADOWY": [
+        {"name": "УДАР В СПИНУ", "combo": "as", "kind": "strike", "cost": 60, "dmg": 24,
+         "desc": "Мгновенный теневой удар — гарантированный крит."},
+        {"name": "ТЕНЕВОЙ ПОТОК", "combo": "ws", "kind": "orb", "cost": 100, "dmg": 10, "speed": 640, "r": 12,
+         "count": 5, "spread": 34,
+         "desc": "Веер из пяти теневых клинков."},
+    ],
+    "STONY": [
+        {"name": "КАМЕННЫЙ ГРОБ", "combo": "as", "kind": "ground", "cost": 60, "dmg": 22, "radius": 110,
+         "stun": 1.0, "heavy": True,
+         "desc": "Тяжёлый каменный столп с оглушением."},
+        {"name": "ГРАВИТАЦИЯ", "combo": "ws", "kind": "pull", "cost": 100,
+         "desc": "Всесильно притягивает врага к себе."},
+    ],
+    "WINDY": [
+        {"name": "СМЕРЧ", "combo": "as", "kind": "pull", "cost": 50,
+         "desc": "Воронка ветра выдергивает врага вперёд."},
+        {"name": "УРАГАН", "combo": "ws", "kind": "barrage", "cost": 100, "count": 6, "dmg": 8,
+         "desc": "Серия воздушных сечей на расстоянии."},
+    ],
+    "SANDY": [
+        {"name": "ПЕСЧАНАЯ БУРЯ", "combo": "as", "kind": "barrage", "cost": 50, "count": 5, "dmg": 7,
+         "desc": "Серия песчаных снарядов в полёте."},
+        {"name": "ЗЫБУЧИЕ ПЕСКИ", "combo": "ws", "kind": "snare", "cost": 100, "dmg": 6, "dur": 1.4,
+         "desc": "Песок втягивает врага, сковывая на 1.4 с."},
+    ],
+    "SOLARY": [
+        {"name": "СОЛНЕЧНЫЙ ВСПЫШК", "combo": "as", "kind": "beam", "cost": 50, "dmg": 22,
+         "desc": "Мгновенный луч света (присед — уворот)."},
+        {"name": "СУПЕРНОВА", "combo": "ws", "kind": "ground", "cost": 100, "dmg": 30, "radius": 120,
+         "heavy": True,
+         "desc": "Взрыв под врагом — тяжёлый урон."},
+    ],
+    "LUNARY": [
+        {"name": "ЛУННЫЙ ПОТОК", "combo": "as", "kind": "heal", "cost": 50, "amount": 30,
+         "desc": "Лунный свет восстанавливает 30 здоровья."},
+        {"name": "ПОЛНОЛУНИЕ", "combo": "ws", "kind": "wave", "cost": 100, "count": 4, "dmg": 20,
+         "desc": "Волна лунных серпов из земли."},
+    ],
+    "NECROY": [
+        {"name": "ХВАТКА МОГИЛЫ", "combo": "as", "kind": "grab", "cost": 50,
+         "dmg": 10, "tick": 5, "dur": 2.2,
+         "desc": "Руки из земли держат врага и жмут урон."},
+        {"name": "ЖАТВА ДУШ", "combo": "ws", "kind": "drain", "cost": 100, "dmg": 26, "heal_pct": 0.6,
+         "desc": "Вытягивает жизь: 60% урона — в здоровье."},
+    ],
+    "PIXY": [
+        {"name": "ПЫЛЬЦЕВЫЙ ШТОРМ", "combo": "as", "kind": "orb", "cost": 50, "dmg": 9, "speed": 600,
+         "r": 11, "count": 5, "spread": 30,
+         "desc": "Веер из пяти сгустков магии."},
+        {"name": "ЛЕСНАЯ ЯРОСТЬ", "combo": "ws", "kind": "buff_atk", "cost": 80, "mult": 1.7, "dur": 6.0,
+         "desc": "Дар леса: +70% урона на 6 с."},
+    ],
+    "BANEY": [
+        {"name": "ОПЛЕТЕНИЕ", "combo": "as", "kind": "snare", "cost": 40, "dmg": 6, "dur": 1.2,
+         "desc": "Паутинный кокоон сковывает врага на 1.2 с."},
+        {"name": "ЛАПЫ-КОСЫ", "combo": "ws", "kind": "barrage", "cost": 70, "count": 6, "dmg": 9,
+         "desc": "Серия ударов задними лапами на расстоянии."},
+        {"name": "ЯДОВИТОЕ ГНЕЗДО", "combo": "wa", "kind": "summon", "cost": 100, "dmg": 6,
+         "dur": 3.0, "count": 4,
+         "desc": "Рой паучков кусает врага 3 секунды."},
+    ],
+    "MAGNEY": [
+        {"name": "МАГНИТНЫЙ ЗАХВАТ", "combo": "as", "kind": "grab", "cost": 50,
+         "dmg": 12, "tick": 5, "dur": 2.0,
+         "desc": "Магнитное поле держит и жмёт врага."},
+        {"name": "ПРИТЯЖЕНИЕ", "combo": "ws", "kind": "pull", "cost": 70,
+         "desc": "Всесильно магнитит врага к себе."},
+        {"name": "МАГНИТНЫЙ ШТОРМ", "combo": "wa", "kind": "barrage", "cost": 100, "count": 7,
+         "dmg": 8,
+         "desc": "Серия металлических снарядов."},
+    ],
+    "CRYSTAY": [
+        {"name": "КРИСТАЛЬНЫЙ УДАР", "combo": "as", "kind": "strike", "cost": 50, "dmg": 24,
+         "desc": "Кристальный копьё — гарантированный крит."},
+        {"name": "КРИСТАЛЬНЫЙ ШТОРМ", "combo": "ws", "kind": "orb", "cost": 70, "dmg": 9,
+         "speed": 620, "r": 11, "count": 6, "spread": 40,
+         "desc": "Шесть кристалов веером."},
+        {"name": "АЛМАЗНЫЙ ДОЖДЬ", "combo": "wa", "kind": "rain", "cost": 100, "count": 6, "dmg": 12,
+         "desc": "Шесть кристальных столпов вокруг врага."},
+    ],
+    "INFERNOY": [
+        {"name": "ОГНЕННЫЙ ЗАХВАТ", "combo": "as", "kind": "grab", "cost": 50,
+         "dmg": 12, "tick": 5, "dur": 2.0,
+         "desc": "Огненные объятия держат и жгут врага."},
+        {"name": "ПОЖАР", "combo": "ws", "kind": "wave", "cost": 70, "count": 5, "dmg": 18,
+         "desc": "Волна из пяти огненных столпов."},
+        {"name": "АДСКОЕ ПАДЕНИЕ", "combo": "wa", "kind": "leap", "cost": 100, "dmg": 30,
+         "radius": 140,
+         "desc": "Метеор-прыжок с огромным взрывом."},
+    ],
+    "MIRAGEY": [
+        {"name": "МИРАЖ-УДАР", "combo": "as", "kind": "strike", "cost": 50, "dmg": 22,
+         "desc": "Удар из иллюзии — гарантированный крит."},
+        {"name": "ВОЛНА МИРАЖЕЙ", "combo": "ws", "kind": "orb", "cost": 70, "dmg": 9, "speed": 600,
+         "r": 11, "count": 5, "spread": 30,
+         "desc": "Веер фантомных снарядов."},
+        {"name": "ДАР МИРАЖА", "combo": "wa", "kind": "heal", "cost": 100, "amount": 40,
+         "desc": "Иллюзия здоровья становится явью: +40 HP."},
+    ],
+}
+
+for _k, _sps in SPECIALS.items():
+    HEROES[_k]["specials"] = _sps

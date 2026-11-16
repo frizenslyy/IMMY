@@ -15,7 +15,7 @@ from immy.heroes import HEROES, RARITY_LABEL, STANDARD_KEYS
 from immy.sound import TRACKS, _render_track
 
 EMPTY_INP = {"move": 0, "jump": False, "crouch": False, "attack": False,
-             "cast": None, "parry": False}
+             "cast": None, "parry": False, "special": None}
 
 
 def play(arena, frames, attack_every=13, cast_every=31, jump_every=47, seed=5):
@@ -58,8 +58,9 @@ def main():
         print("hero", hero, "ok", a.wins_p, ":", a.wins_b, "round", a.round)
 
     a = Arena("LIGHTY", "DEADY", 10, True)
-    assert a.boss and a.b.scale > 1.2 and a.b.max_hp > 200
-    assert a.b.max_hp < 300 and a.b.dmg_mult < 2.0
+    assert a.boss and a.b.scale > 1.2
+    assert 150 < a.b.max_hp < 220 and a.b.dmg_mult < 1.7
+    assert a.p.dmg_mult == 1.1
     play(a, 8000, attack_every=9)
     assert a.phase == "end"
     print("boss ok, reward:", a.reward)
@@ -322,6 +323,55 @@ def main():
     a2.phase = "fight"
     assert a2.b.hp == a2.b.max_hp
     print("melee single application ok")
+
+    for key in HEROES:
+        h = HEROES[key]
+        sps = h.get("specials", [])
+        want = 3 if h["rarity"] == "uncommon" else 2
+        assert len(sps) == want, (key, len(sps))
+        combos = [sp["combo"] for sp in sps]
+        assert len(set(combos)) == len(combos) and all(c in ("as", "ws", "wa", "wd") for c in combos)
+        costs = [sp["cost"] for sp in sps]
+        assert costs == sorted(costs) and all(0 < c <= 100 for c in costs)
+        for sp in sps:
+            assert sp.get("name") and sp.get("desc")
+    print("specials data ok")
+
+    a = Arena("DEADY", "LIGHTY", 1, False)
+    a.phase = "fight"
+    a.ai.update = lambda *args: None
+    e0 = a.p.energy
+    a.register_hit(a.p, a.b, 20)
+    assert a.p.energy > e0, (e0, a.p.energy)
+    print("energy gain ok")
+
+    a.p.energy = 100.0
+    a.b.x = a.p.x + 120
+    assert a.cast_special(a.p, "as", a.b)
+    assert a.b.root_t > 0 and abs(a.p.energy - 50) < 1e-6 and a.p.special_cd > 0
+    assert any(fx["kind"] == "grab" for fx in a.fx)
+    for _ in range(40):
+        a.update(1 / 60, dict(EMPTY_INP))
+    assert a.b.hp < a.b.max_hp
+    print("deady grab ok")
+
+    e = a.p.energy
+    assert not a.cast_special(a.p, "ws", a.b)
+    assert a.p.energy == e
+    print("special energy gate ok")
+
+    a = Arena("BANEY", "EMBERY", 1, False)
+    a.phase = "fight"
+    a.ai.update = lambda *args: None
+    a.p.energy = 100.0
+    a.b.x = a.p.x + 260
+    assert a.cast_special(a.p, "ws", a.b)
+    assert abs(a.p.energy - 30) < 1e-6
+    assert any(fx["kind"] == "barrage" for fx in a.fx)
+    for _ in range(30):
+        a.update(1 / 60, dict(EMPTY_INP))
+    assert any(pr["kind"] == "barr" for pr in a.proj)
+    print("baney barrage ok")
 
     save_mod.SAVE_FILE = tempfile.mktemp(suffix=".json")
     save_mod.save_save(777, 4, ["DEADY", "FROSTY", "BANEY"])

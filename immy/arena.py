@@ -31,14 +31,15 @@ class Arena:
         self.p = Fighter(player_key, W * 0.32, 1)
         self.b = Fighter(bot_key, W * 0.68, -1, scale=1.35 if boss else 1.0)
         self.b.is_bot = True
-        self.b.max_hp = 100.0 * (1 + level * 0.06) * (1.55 if boss else 1.0)
+        self.b.max_hp = 100.0 * (1 + level * 0.045) * (1.35 if boss else 1.0)
         self.b.hp = self.b.max_hp
         self.b.disp_hp = self.b.max_hp
-        self.b.base_dmg = (1 + level * 0.045) * (1.25 if boss else 1.0)
-        self.b.base_speed = 1 + min(0.5, level * 0.02)
-        self.b.reaction = max(0.14, 0.55 - level * 0.018)
+        self.b.base_dmg = (1 + level * 0.035) * (1.15 if boss else 1.0)
+        self.b.base_speed = 1 + min(0.4, level * 0.015)
+        self.b.reaction = max(0.18, 0.55 - level * 0.015)
         self.b.dmg_mult = self.b.base_dmg
         self.b.speed_mult = self.b.base_speed
+        self.p.dmg_mult = 1.1
         self.ai = BotAI(self.b, level)
         if survival:
             self.spawn_wave()
@@ -81,6 +82,7 @@ class Arena:
             fighter.parry_t = fighter.parry_cd = fighter.parry_flash = 0.0
             fighter.root_t = 0.0
             fighter.poison_t = fighter.poison_dps = fighter.poison_tick = 0.0
+            fighter.special_cd = 0.0
         self.b.dmg_mult = self.b.base_dmg * (1.15 if self.round >= 2 else 1.0)
         self.b.speed_mult = self.b.base_speed * (1.10 if self.round >= 2 else 1.0)
         self.proj = []
@@ -95,12 +97,12 @@ class Arena:
         key = random.choice([k for k in HEROES if k != self.p.key])
         self.b = Fighter(key, W * 0.68, -1, scale=1.25 if mini else 1.0)
         self.b.is_bot = True
-        self.b.max_hp = 100.0 * (1 + self.wave * 0.10) * (1.8 if mini else 1.0)
+        self.b.max_hp = 100.0 * (1 + self.wave * 0.08) * (1.5 if mini else 1.0)
         self.b.hp = self.b.max_hp
         self.b.disp_hp = self.b.max_hp
-        self.b.base_dmg = (1 + self.wave * 0.04) * (1.3 if mini else 1.0)
-        self.b.base_speed = 1 + min(0.5, self.wave * 0.015)
-        self.b.reaction = max(0.16, 0.55 - self.wave * 0.015)
+        self.b.base_dmg = (1 + self.wave * 0.03) * (1.15 if mini else 1.0)
+        self.b.base_speed = 1 + min(0.4, self.wave * 0.012)
+        self.b.reaction = max(0.18, 0.55 - self.wave * 0.012)
         self.b.dmg_mult = self.b.base_dmg
         self.b.speed_mult = self.b.base_speed
         self.ai = BotAI(self.b, min(self.wave, 20))
@@ -171,6 +173,8 @@ class Arena:
                 p.try_parry()
             if inp["cast"] is not None:
                 self.cast_ability(p, inp["cast"], b)
+            if inp.get("special"):
+                self.cast_special(p, inp["special"], b)
         self.ai.update(dt, p, self)
         p.update(dt, b, self)
         b.update(dt, p, self)
@@ -241,6 +245,7 @@ class Arena:
             self.parts.dmg_text(foe.x, foe.y - 170 * foe.scale, dmg, big=heavy)
             self.shake = max(self.shake, 7 if heavy else 5)
             self.hitstop = max(self.hitstop, 0.09 if heavy else 0.05)
+        att.gain_energy(dmg)
         if att.buffs["vamp"] > 0 and att.vamp_pct > 0:
             heal = dmg * att.vamp_pct
             att.hp = min(att.max_hp, att.hp + heal)
@@ -272,10 +277,31 @@ class Arena:
         if idx < 0 or idx >= len(abilities) or f.cds[idx] > 0:
             return False
         ab = abilities[idx]
+        if ab["kind"] == "scythe" and f.scythe_out:
+            return False
+        if not self.exec_kind(f, ab, foe):
+            return False
+        f.cds[idx] = ab["cd"]
+        return True
+
+    def cast_special(self, f, combo, foe):
+        if f.dead or f.stun_t > 0 or self.phase != "fight":
+            return False
+        if f.special_cd > 0:
+            return False
+        sp = next((s for s in f.h.get("specials", []) if s["combo"] == combo), None)
+        if sp is None or f.energy < sp["cost"]:
+            return False
+        if not self.exec_kind(f, sp, foe):
+            return False
+        f.energy -= sp["cost"]
+        f.special_cd = 1.0
+        return True
+
+    def exec_kind(self, f, ab, foe):
         k = ab["kind"]
         if k == "scythe" and f.scythe_out:
             return False
-        f.cds[idx] = ab["cd"]
         f.attack_t = 0.25
         f.attack_kind = "cast"
         if k == "scythe":
@@ -416,8 +442,20 @@ class Arena:
                                 "owner": f, "t": ab.get("warn", 0.8) + i * 0.15,
                                 "dmg": ab.get("dmg", 10), "dodge": ab.get("dodge", "crouch"),
                                 "color": f.h["glow"]})
+        elif k == "grab":
+            if foe.buffs["soul"] > 0 or foe.dead or abs(foe.x - f.x) > ab.get("range", 240):
+                return False
+            self.register_hit(f, foe, ab.get("dmg", 12), kb_force=0)
+            foe.root_t = max(foe.root_t, ab.get("dur", 2.0))
+            foe.stun_t = max(foe.stun_t, 0.4)
+            self.fx.append({"kind": "grab", "owner": f, "foe": foe, "t": ab.get("dur", 2.0),
+                            "dmg": ab.get("tick", 4), "tick_t": 0.5, "color": f.h["accent"]})
+            self.shake = max(self.shake, 6)
+        elif k == "barrage":
+            self.fx.append({"kind": "barrage", "owner": f, "t": ab.get("dur", 2.2),
+                            "n": ab.get("count", 5), "spawn_t": 0.1, "gap": ab.get("gap", 0.18),
+                            "dmg": ab.get("dmg", 8), "speed": ab.get("speed", 720), "color": f.h["accent"]})
         else:
-            f.cds[idx] = 0.0
             return False
         return True
 
@@ -458,6 +496,10 @@ class Arena:
                         self.register_hit(pr["owner"], foe, pr["dmg"] * 0.7)
             else:
                 pr["x"] += pr["vx"] * dt
+                pr["y"] += pr.get("vy", 0.0) * dt
+                if pr["y"] < 40 or pr["y"] > GROUND_Y + 10:
+                    self.proj.remove(pr)
+                    continue
                 if random.random() < dt * 40:
                     self.parts.trail(pr["x"], pr["y"] + random.uniform(-6, 6), pr["color"])
                 if not foe.dead and foe.buffs["soul"] <= 0 and self.circ_hit(pr, foe, pr["r"] + 14):
@@ -514,6 +556,39 @@ class Arena:
                 if not foe.dead and foe.buffs["soul"] <= 0 and foe.root_t <= 0:
                     foe.kvx += (1 if fx["owner"].x > foe.x else -1) * 2600 * dt
                 if fx["t"] <= 0:
+                    self.fx.remove(fx)
+                continue
+            if k == "grab":
+                fx["t"] -= dt
+                foe = fx["foe"]
+                fx["tick_t"] -= dt
+                if fx["tick_t"] <= 0:
+                    fx["tick_t"] = 0.5
+                    if not foe.dead and foe.buffs["soul"] <= 0 and abs(foe.x - fx["owner"].x) < 260:
+                        self.register_hit(fx["owner"], foe, fx["dmg"], kb_force=0)
+                    else:
+                        fx["t"] = 0.0
+                if fx["t"] <= 0:
+                    self.fx.remove(fx)
+                continue
+            if k == "barrage":
+                fx["t"] -= dt
+                fx["spawn_t"] -= dt
+                f = fx["owner"]
+                foe = self.foe_of(f)
+                if fx["spawn_t"] <= 0 and fx["n"] > 0 and not f.dead:
+                    fx["spawn_t"] = fx["gap"]
+                    fx["n"] -= 1
+                    sx, sy = f.x + f.facing * 40 * f.scale, f.y - 110 * f.scale
+                    tx, ty = foe.x, foe.y - 80 * foe.scale
+                    dd = math.hypot(tx - sx, ty - sy) or 1.0
+                    sp = fx["speed"]
+                    self.proj.append({"kind": "barr", "owner": f, "x": sx, "y": sy,
+                                      "vx": (tx - sx) / dd * sp, "vy": (ty - sy) / dd * sp,
+                                      "dmg": fx["dmg"], "r": 9, "color": fx["color"]})
+                    self.parts.burst(sx, sy, fx["color"], 4, 120)
+                if fx["t"] <= 0 or (fx["n"] <= 0 and fx["spawn_t"] < fx["gap"] - 0.05 and not any(
+                        p["owner"] is f for p in self.proj)):
                     self.fx.remove(fx)
                 continue
             fx["t"] -= dt
@@ -659,6 +734,16 @@ class Arena:
                 r = fx["radius"]
                 cv.create_oval(f.x - r + ox, GROUND_Y - r * 0.3 + oy, f.x + r + ox, GROUND_Y + r * 0.3 + oy,
                                outline=f.h["accent"], width=3, tags=("dyn",), dash=(6, 6))
+            elif k == "grab":
+                f, foe = fx["owner"], fx["foe"]
+                x0, y0 = f.x + f.facing * 26 * f.scale + ox, f.y - 90 * f.scale + oy
+                x1, y1 = foe.x + ox, foe.y - 80 * foe.scale + oy
+                cv.create_line(x0, y0, x1, y1, fill=fx["color"], width=5, tags=("dyn",), stipple="gray50")
+                cv.create_line(x0, y0, x1, y1, fill="#fff7b0", width=2, tags=("dyn",))
+                for i in range(4):
+                    tt = (now * 3.0 + i / 4.0) % 1.0
+                    px, py = x0 + (x1 - x0) * tt, y0 + (y1 - y0) * tt
+                    cv.create_oval(px - 3, py - 3, px + 3, py + 3, fill="#fff7b0", outline="", tags=("dyn",))
 
     def draw_proj(self, cv, ox, oy):
         for pr in self.proj:
@@ -697,6 +782,12 @@ class Arena:
     def draw_hud(self, cv, coins):
         self.hp_bar(cv, 100, 380, self.p, True)
         self.hp_bar(cv, W - 480, 380, self.b, False)
+        efrac = clamp(self.p.energy / 100.0, 0.0, 1.0)
+        cv.create_rectangle(141, 70, 483, 84, fill="#160404", outline="#5a1c10", width=2, tags=("dyn",))
+        if efrac > 0:
+            cv.create_rectangle(144, 73, 144 + int(336 * efrac), 81, fill=COL_GOLD, outline="", tags=("dyn",))
+        cv.create_text(480, 77, text="ЭНЕРГИЯ", anchor="e", font=F_TINY,
+                       fill="#5a1c10" if efrac > 0.85 else "#a1700a", tags=("dyn",))
         for i in range(0 if self.survival else 2):
             for side, wins in ((-1, self.wins_p), (1, self.wins_b)):
                 cx = W / 2 + side * (44 + i * 30)
@@ -743,6 +834,18 @@ class Arena:
             cv.create_text(x + 30, H - 44, text="%.1f" % pcd, fill="#e8c9a0", font=F_SMALL, tags=("dyn",))
         cv.create_text(x + 30, H - 58, text="F", fill=COL_GOLD if ready else "#8a4a20", font=F_MID, tags=("dyn",))
         cv.create_text(x + 30, H - 27, text="ПАРИР", fill=COL_ORANGE, font=F_TINY, tags=("dyn",))
+        sps = self.p.h.get("specials", ())
+        sx = x0 + total + 12
+        for i, sp in enumerate(sps):
+            x = sx + i * 58
+            can = self.p.energy >= sp["cost"] and self.p.special_cd <= 0
+            col = "#ffd24a" if can else "#5a1c10"
+            cv.create_rectangle(x, H - 76, x + 54, H - 16, fill=COL_DARK, outline=col, width=2, tags=("dyn",))
+            cv.create_text(x + 27, H - 58, text=sp["combo"].upper(), fill="#ffd24a" if can else "#8a4a20",
+                           font=F_SMALL, tags=("dyn",))
+            cv.create_text(x + 27, H - 40, text=sp["name"].split()[0][:8], fill=COL_ORANGE, font=F_TINY, tags=("dyn",))
+            cv.create_text(x + 27, H - 25, text=str(sp["cost"]), fill="#ffd24a" if can else "#8a4a20",
+                           font=F_TINY, tags=("dyn",))
         if self.combo_show > 0 and self.combo_count >= 2:
             cv.create_text(W / 2 + 2, 132, text="COMBO x%d" % self.combo_count, font=F_BIG, fill="#2a0503", tags=("dyn",))
             cv.create_text(W / 2, 130, text="COMBO x%d" % self.combo_count, font=F_BIG, fill=COL_GOLD, tags=("dyn",))
