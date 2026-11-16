@@ -95,6 +95,21 @@ class BotAI:
     def cast_logic(self, dist, foe, game):
         f = self.f
         low_hp = f.hp < f.max_hp * 0.5
+        if self.level >= 2 and f.special_cd <= 0 and random.random() < 0.35:
+            for sp in f.h.get("specials", ()):
+                if f.energy < sp["cost"]:
+                    continue
+                k = sp["kind"]
+                if k in ("grab", "strike"):
+                    ok = dist < sp.get("range", 240)
+                elif k == "heal":
+                    ok = low_hp
+                elif k in ("buff_atk", "buff_def", "buff_spd", "summon"):
+                    ok = dist < 340
+                else:
+                    ok = dist > 180
+                if ok and game.cast_special(f, sp["combo"], foe):
+                    return
         try_c = game.cast_ability
         for i, ab in enumerate(f.h["abilities"]):
             if f.cds[i] > 0:

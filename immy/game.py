@@ -55,6 +55,7 @@ class Game(tk.Tk):
         self.hero_sel = "DEADY"
         self.keys = set()
         self.events = set()
+        self.prev_combos = set()
         self.buttons = []
         self.mouse = (0, 0)
         self.arena = None
@@ -180,7 +181,8 @@ class Game(tk.Tk):
 
     def build_input(self):
         inp = {"move": 0, "jump": "jump" in self.events, "crouch": "s" in self.keys,
-               "attack": "attack" in self.events, "cast": None, "parry": "parry" in self.events}
+               "attack": "attack" in self.events, "cast": None, "parry": "parry" in self.events,
+               "special": None}
         if "a" in self.keys:
             inp["move"] -= 1
         if "d" in self.keys:
@@ -188,6 +190,19 @@ class Game(tk.Tk):
         for e in self.events:
             if e in ("1", "2", "3", "4"):
                 inp["cast"] = int(e) - 1
+        combos = set()
+        if {"a", "s"} <= self.keys:
+            combos.add("as")
+        if {"w", "s"} <= self.keys:
+            combos.add("ws")
+        if {"w", "a"} <= self.keys:
+            combos.add("wa")
+        if {"w", "d"} <= self.keys:
+            combos.add("wd")
+        fresh = combos - self.prev_combos
+        if fresh:
+            inp["special"] = sorted(fresh)[0]
+        self.prev_combos = combos
         self.events.clear()
         return inp
 
@@ -229,7 +244,7 @@ class Game(tk.Tk):
         self.ui.coins(cv, 30, H - 40, self.coins)
         cv.create_text(W - 30, H - 40, text="БОТ: УР. %d" % self.bot_level, anchor="e",
                        fill=COL_ORANGE, font=F_MID, tags=("dyn",))
-        cv.create_text(W / 2, H - 14, text="ЛКМ — атака · WASD/стрелки — движение · F — парирование · 1/2/3/4 — способности · M — музыка",
+        cv.create_text(W / 2, H - 14, text="ЛКМ — атака · WASD — движение · F — парирование · 1/2/3/4 — способности · A+S/W+S — спецприёмы",
                        fill=COL_SAND, font=F_TINY, tags=("dyn",))
 
     def draw_mode(self):
@@ -301,14 +316,28 @@ class Game(tk.Tk):
             cv.create_rectangle(990, yy - 5, 990 + val * 19, yy + 5, fill=scol, outline="", tags=("dyn",))
             cv.create_text(1200, yy, text=str(val), anchor="e", fill=COL_GOLD, font=F_TINY, tags=("dyn",))
         cv.create_text(900, 378, text="СПОСОБНОСТИ", anchor="w", fill=COL_ORANGE, font=F_SMALL, tags=("dyn",))
+        step = 50 if len(hero["abilities"]) > 3 else 62
         y = 402
         for i, ab in enumerate(hero["abilities"]):
             cv.create_text(900, y, text="[%d] %s" % (i + 1, ab["name"]), anchor="w", fill=COL_GOLD,
                            font=F_SMALL, tags=("dyn",))
             cv.create_text(1236, y, text="%dс" % ab["cd"], anchor="e", fill="#ff5a1a", font=F_SMALL, tags=("dyn",))
-            cv.create_text(920, y + 22, text=ab["desc"], anchor="w", fill=COL_SAND, font=F_TINY,
+            cv.create_text(920, y + 18, text=ab["desc"], anchor="w", fill=COL_SAND, font=F_TINY,
                            width=310, tags=("dyn",))
-            y += 62
+            y += step
+        sps = hero.get("specials", ())
+        if sps:
+            cv.create_text(900, y + 2, text="СПЕЦПРИЕМЫ", anchor="w",
+                           fill=COL_ORANGE, font=F_SMALL, tags=("dyn",))
+            cv.create_text(1236, y + 2, text="энергия за удары",
+                           anchor="e", fill="#8a4a20", font=F_TINY, tags=("dyn",))
+            for sp in sps:
+                y += 20
+                cv.create_text(900, y, text="[%s] %s" % (sp["combo"], sp["name"]), anchor="w",
+                               fill="#ffd24a", font=F_SMALL, tags=("dyn",))
+                cv.create_text(1236, y, text="%d" % sp["cost"], anchor="e", fill="#ff5a1a",
+                               font=F_SMALL, tags=("dyn",))
+            y += 20
 
         self.ui.button(cv, 24, 24, 150, 70, "НАЗАД", self.goto_menu, font=F_SMALL)
         if select_mode:

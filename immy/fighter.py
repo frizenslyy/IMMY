@@ -54,6 +54,8 @@ class Fighter:
         self.parry_cd = 0.0
         self.parry_flash = 0.0
         self.root_t = 0.0
+        self.energy = 0.0
+        self.special_cd = 0.0
         self.poison_t = 0.0
         self.poison_dps = 0.0
         self.poison_tick = 0.0
@@ -108,6 +110,10 @@ class Fighter:
             dmg *= CRIT_MULT
         return dmg, crit
 
+    def gain_energy(self, dmg):
+        if dmg > 0:
+            self.energy = min(100.0, self.energy + 6.0 + dmg * 0.15)
+
     def eff_speed(self):
         m = self.speed_mult * self.stat_spd
         if self.buffs["swift"] > 0:
@@ -151,6 +157,7 @@ class Fighter:
         self.parry_t = max(0.0, self.parry_t - dt)
         self.parry_cd = max(0.0, self.parry_cd - dt)
         self.parry_flash = max(0.0, self.parry_flash - dt)
+        self.special_cd = max(0.0, self.special_cd - dt)
         self.root_t = max(0.0, self.root_t - dt)
         if self.poison_t > 0:
             self.poison_t = max(0.0, self.poison_t - dt)
