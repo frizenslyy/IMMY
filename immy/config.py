@@ -43,3 +43,14 @@ CRIT_MULT = 1.8
 
 MAX_PARTS = 150
 MAX_EMBERS = 24
+
+
+def exp_to_next(level):
+    return 80 + level * 40
+
+
+ULT_HP = 0.10
+ULT_QUALITY = 0.05
+ULT_LEFT = 4.0
+ULT_RANGE_Y = 200
+FINISHER_BONUS = 25

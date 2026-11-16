@@ -1,13 +1,12 @@
 """IMMY — процедурная фоновая музыка (чиптюн) без сторонних библиотек.
 
-Синтез WAV в памяти (wave + math), воспроизведение:
+Синтез WAV в памяти (wave + struct), воспроизведение:
   Windows — winsound (асинхронно, с зацикливанием),
   Linux/macOS — aplay/paplay/afplay в фоновом потоке.
 Если плеера нет — игра работает молча.
 """
 
 import io
-import math
 import struct
 import subprocess
 import sys

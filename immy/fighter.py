@@ -4,7 +4,7 @@ import math
 import random
 
 from .config import (COMBO_MULT, COMBO_WINDOW, CRIT_MULT, GROUND_Y, GRAVITY,
-                     PARRY_CD, PARRY_STUN, PARRY_WINDOW, W, WALL)
+                     PARRY_CD, PARRY_WINDOW, W, WALL)
 from .heroes import HEROES
 from .util import clamp
 
@@ -56,6 +56,7 @@ class Fighter:
         self.root_t = 0.0
         self.energy = 0.0
         self.special_cd = 0.0
+        self.sp_cds = {}
         self.poison_t = 0.0
         self.poison_dps = 0.0
         self.poison_tick = 0.0
@@ -158,6 +159,8 @@ class Fighter:
         self.parry_cd = max(0.0, self.parry_cd - dt)
         self.parry_flash = max(0.0, self.parry_flash - dt)
         self.special_cd = max(0.0, self.special_cd - dt)
+        for k in self.sp_cds:
+            self.sp_cds[k] = max(0.0, self.sp_cds[k] - dt)
         self.root_t = max(0.0, self.root_t - dt)
         if self.poison_t > 0:
             self.poison_t = max(0.0, self.poison_t - dt)
