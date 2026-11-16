@@ -9,14 +9,19 @@ from .config import (COMBO_KB, COL_DEEPRED, COL_DARK, COL_FRAME, COL_GOLD, COL_O
                      CRIT_MULT, F_BIG, F_HUGE, F_MID, F_SMALL, F_TINY, GROUND_Y, H, MELEE_RANGE,
                      PARRY_CD, PARRY_STUN, W, WALL)
 from .fighter import Fighter
+from .heroes import HEROES
 from .particles import Particles
 from .util import clamp
 
 
 class Arena:
-    def __init__(self, player_key, bot_key, level, boss, map=None):
+    def __init__(self, player_key, bot_key, level, boss, map=None, survival=False):
         self.level = level
         self.boss = boss
+        self.survival = survival
+        self.wave = 1
+        self.run_reward = 0
+        self.mini = False
         self.map = map if map is not None else random.choice(MAPS)
         self.round = 1
         self.wins_p = 0
@@ -26,15 +31,17 @@ class Arena:
         self.p = Fighter(player_key, W * 0.32, 1)
         self.b = Fighter(bot_key, W * 0.68, -1, scale=1.35 if boss else 1.0)
         self.b.is_bot = True
-        self.b.max_hp = 100.0 * (1 + level * 0.06) * (2.0 if boss else 1.0)
+        self.b.max_hp = 100.0 * (1 + level * 0.06) * (1.55 if boss else 1.0)
         self.b.hp = self.b.max_hp
         self.b.disp_hp = self.b.max_hp
-        self.b.base_dmg = (1 + level * 0.045) * (1.5 if boss else 1.0)
+        self.b.base_dmg = (1 + level * 0.045) * (1.25 if boss else 1.0)
         self.b.base_speed = 1 + min(0.5, level * 0.02)
         self.b.reaction = max(0.14, 0.55 - level * 0.018)
         self.b.dmg_mult = self.b.base_dmg
         self.b.speed_mult = self.b.base_speed
         self.ai = BotAI(self.b, level)
+        if survival:
+            self.spawn_wave()
         self.proj = []
         self.fx = []
         self.parts = Particles()
@@ -74,15 +81,48 @@ class Arena:
             fighter.parry_t = fighter.parry_cd = fighter.parry_flash = 0.0
             fighter.root_t = 0.0
             fighter.poison_t = fighter.poison_dps = fighter.poison_tick = 0.0
-        self.b.dmg_mult = self.b.base_dmg * (1.25 if self.round >= 2 else 1.0)
-        self.b.speed_mult = self.b.base_speed * (1.15 if self.round >= 2 else 1.0)
+        self.b.dmg_mult = self.b.base_dmg * (1.15 if self.round >= 2 else 1.0)
+        self.b.speed_mult = self.b.base_speed * (1.10 if self.round >= 2 else 1.0)
         self.proj = []
         self.fx = []
         self.melee = []
         self.parts.clear()
         self.combo_count = 0
 
+    def spawn_wave(self):
+        mini = self.wave % 5 == 0
+        self.mini = mini
+        key = random.choice([k for k in HEROES if k != self.p.key])
+        self.b = Fighter(key, W * 0.68, -1, scale=1.25 if mini else 1.0)
+        self.b.is_bot = True
+        self.b.max_hp = 100.0 * (1 + self.wave * 0.10) * (1.8 if mini else 1.0)
+        self.b.hp = self.b.max_hp
+        self.b.disp_hp = self.b.max_hp
+        self.b.base_dmg = (1 + self.wave * 0.04) * (1.3 if mini else 1.0)
+        self.b.base_speed = 1 + min(0.5, self.wave * 0.015)
+        self.b.reaction = max(0.16, 0.55 - self.wave * 0.015)
+        self.b.dmg_mult = self.b.base_dmg
+        self.b.speed_mult = self.b.base_speed
+        self.ai = BotAI(self.b, min(self.wave, 20))
+
     def after_ko(self):
+        if self.survival:
+            if self.p.dead:
+                self.win = False
+                self.reward = self.run_reward
+                self.phase = "end"
+                self.phase_t = 1e9
+            else:
+                self.run_reward += (100 if self.mini else 50) + self.wave * 10
+                hp0 = self.p.hp
+                self.wave += 1
+                self.reset_round()
+                self.spawn_wave()
+                self.p.hp = min(self.p.max_hp, hp0 + self.p.max_hp * 0.4)
+                self.p.disp_hp = self.p.hp
+                self.phase = "intro"
+                self.phase_t = 1.6
+            return
         if self.wins_p >= 2 or self.wins_b >= 2:
             self.win = self.wins_p >= 2
             self.reward = (100 if self.boss else 50) * self.level
@@ -657,16 +697,19 @@ class Arena:
     def draw_hud(self, cv, coins):
         self.hp_bar(cv, 100, 380, self.p, True)
         self.hp_bar(cv, W - 480, 380, self.b, False)
-        for i in range(2):
+        for i in range(0 if self.survival else 2):
             for side, wins in ((-1, self.wins_p), (1, self.wins_b)):
                 cx = W / 2 + side * (44 + i * 30)
                 filled = wins > i
                 cv.create_oval(cx - 10, 36, cx + 10, 56,
                                fill=COL_DEEPRED if filled else "#1a0908",
                                outline=COL_GOLD if filled else COL_FRAME, width=2, tags=("dyn",))
-        lvl_txt = ("БОСС · УР. %d" if self.boss else "БОТ · УР. %d") % self.level
+        if self.survival:
+            lvl_txt = ("ВОЛНА %d · МИНИ-БОСС" % self.wave) if self.mini else ("ВОЛНА %d" % self.wave)
+        else:
+            lvl_txt = ("БОСС · УР. %d" if self.boss else "БОТ · УР. %d") % self.level
         cv.create_text(W - 60, 110, text=lvl_txt, anchor="e", font=F_MID,
-                       fill="#ff2a1a" if self.boss else COL_ORANGE, tags=("dyn",))
+                       fill="#ff2a1a" if (self.boss or (self.survival and self.mini)) else COL_ORANGE, tags=("dyn",))
         cv.create_oval(44, 74, 62, 92, fill=COL_GOLD, outline="#a1700a", width=2, tags=("dyn",))
         cv.create_text(70, 83, text=str(coins), anchor="w", fill=COL_GOLD, font=F_MID, tags=("dyn",))
         n_ab = len(self.p.h["abilities"])
@@ -731,7 +774,10 @@ class Arena:
             cv.create_rectangle(0, 0, W, H, fill="#1a0a2a", stipple="gray25", outline="", tags=("dyn",))
 
         if self.phase == "intro":
-            txt = "РАУНД %d" % self.round if self.phase_t > 0.6 else "БОЙ!"
+            if self.survival:
+                txt = ("ВОЛНА %d" % self.wave) if self.phase_t > 0.6 else "БОЙ!"
+            else:
+                txt = "РАУНД %d" % self.round if self.phase_t > 0.6 else "БОЙ!"
             col = COL_GOLD if self.phase_t > 0.6 else COL_RED
             self.banner(cv, txt, col)
         elif self.phase == "ko":
@@ -740,15 +786,22 @@ class Arena:
             cv.create_rectangle(0, 0, W, H, fill="#0a0202", stipple="gray50", outline="", tags=("dyn",))
             cv.create_rectangle(W / 2 - 340, 170, W / 2 + 340, 560, fill=COL_DARK, outline=COL_GOLD,
                                 width=3, tags=("dyn",))
-            t1 = "ПОБЕДА!" if self.win else "ПОРАЖЕНИЕ"
-            cv.create_text(W / 2, 245, text=t1, font=F_HUGE,
-                           fill=COL_GOLD if self.win else "#8a4a20", tags=("dyn",))
-            if self.win:
-                cv.create_text(W / 2, 315, text="+%d МОНЕТ" % self.reward, font=F_BIG, fill=COL_ORANGE, tags=("dyn",))
-                sub = "Уровень %d%s пройден!" % (self.level, " (БОСС ×2)" if self.boss else "")
-                cv.create_text(W / 2, 360, text=sub, font=F_SMALL, fill="#e8c9a0", tags=("dyn",))
-            else:
-                cv.create_text(W / 2, 325, text="Бот уровня %d оказался сильнее." % self.level,
+            if self.survival:
+                cv.create_text(W / 2, 245, text="ВЫЖИВАНИЕ ОКОНЧЕНО", font=F_HUGE, fill=COL_GOLD, tags=("dyn",))
+                if self.reward > 0:
+                    cv.create_text(W / 2, 315, text="+%d МОНЕТ" % self.reward, font=F_BIG, fill=COL_ORANGE, tags=("dyn",))
+                cv.create_text(W / 2, 360, text="Пройдено волн: %d" % (self.wave - 1),
                                font=F_SMALL, fill="#e8c9a0", tags=("dyn",))
-            cv.create_text(W / 2, 420, text="Счёт раундов  %d : %d" % (self.wins_p, self.wins_b),
-                           font=F_SMALL, fill=COL_SAND, tags=("dyn",))
+            else:
+                t1 = "ПОБЕДА!" if self.win else "ПОРАЖЕНИЕ"
+                cv.create_text(W / 2, 245, text=t1, font=F_HUGE,
+                               fill=COL_GOLD if self.win else "#8a4a20", tags=("dyn",))
+                if self.win:
+                    cv.create_text(W / 2, 315, text="+%d МОНЕТ" % self.reward, font=F_BIG, fill=COL_ORANGE, tags=("dyn",))
+                    sub = "Уровень %d%s пройден!" % (self.level, " (БОСС ×2)" if self.boss else "")
+                    cv.create_text(W / 2, 360, text=sub, font=F_SMALL, fill="#e8c9a0", tags=("dyn",))
+                else:
+                    cv.create_text(W / 2, 325, text="Бот уровня %d оказался сильнее." % self.level,
+                                   font=F_SMALL, fill="#e8c9a0", tags=("dyn",))
+                cv.create_text(W / 2, 420, text="Счёт раундов  %d : %d" % (self.wins_p, self.wins_b),
+                               font=F_SMALL, fill=COL_SAND, tags=("dyn",))

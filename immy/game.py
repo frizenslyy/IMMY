@@ -102,7 +102,8 @@ class Game(tk.Tk):
     def goto_heroes(self):
         self.set_state("heroes")
 
-    def goto_select(self):
+    def goto_select(self, mode="bot"):
+        self.next_mode = mode
         self.set_state("select")
 
     def goto_shop(self):
@@ -128,10 +129,13 @@ class Game(tk.Tk):
         self.shop_msg = ("КУПЛЕНО: %s!" % hero["name"], time.time() + 2.5)
 
     def start_fight(self):
-        level = self.bot_level
-        boss = level % 10 == 0
-        bot_key = random.choice([k for k in HEROES if k != self.hero_sel])
-        self.arena = Arena(self.hero_sel, bot_key, level, boss, map=random.choice(MAPS))
+        if getattr(self, "next_mode", "bot") == "survival":
+            self.arena = Arena(self.hero_sel, "DEADY", 1, False, map=random.choice(MAPS), survival=True)
+        else:
+            level = self.bot_level
+            boss = level % 10 == 0
+            bot_key = random.choice([k for k in HEROES if k != self.hero_sel])
+            self.arena = Arena(self.hero_sel, bot_key, level, boss, map=random.choice(MAPS))
         self.set_state("fight")
 
     def on_key(self, e):
@@ -209,10 +213,11 @@ class Game(tk.Tk):
             self.arena.update(dt, inp)
             if self.arena.phase == "end" and not self.arena.rewarded:
                 self.arena.rewarded = True
-                if self.arena.win:
+                if self.arena.reward:
                     self.coins += self.arena.reward
+                if self.arena.win and not self.arena.survival:
                     self.bot_level += 1
-                    save_save(self.coins, self.bot_level, self.owned)
+                save_save(self.coins, self.bot_level, self.owned)
         self.draw()
 
     def draw_menu(self):
@@ -231,12 +236,18 @@ class Game(tk.Tk):
         cv = self.cv
         cv.create_text(W / 2 + 3, 133, text="ВЫБОР РЕЖИМА", font=F_BIG, fill="#2a0503", tags=("dyn",))
         cv.create_text(W / 2, 130, text="ВЫБОР РЕЖИМА", font=F_BIG, fill=COL_GOLD, tags=("dyn",))
-        self.ui.button(cv, W / 2 - 120, 240, W / 2 + 120, 480, "VS БОТ", self.goto_select, font=F_SQUARE)
-        cv.create_text(W / 2, 530, text="БОТ: УРОВЕНЬ %d" % self.bot_level, fill=COL_ORANGE,
+        self.ui.button(cv, W / 2 - 160, 220, W / 2 + 160, 330, "VS БОТ", self.goto_select, font=F_SQUARE)
+        self.ui.button(cv, W / 2 - 160, 360, W / 2 + 160, 470, "ВЫЖИВАНИЕ",
+                       lambda: self.goto_select("survival"), font=F_MID)
+        cv.create_text(W / 2, 510, text="БОТ: УРОВЕНЬ %d" % self.bot_level, fill=COL_ORANGE,
                        font=F_MID, tags=("dyn",))
         if self.bot_level % 10 == 0:
-            cv.create_text(W / 2, 566, text="!! ВНИМАНИЕ: ЭТО БОСС !!", fill="#ff2a1a", font=F_MID, tags=("dyn",))
-        self.ui.coins(cv, W / 2 - 40, 610, self.coins)
+            cv.create_text(W / 2, 542, text="!! ВНИМАНИЕ: ЭТО БОСС !!", fill="#ff2a1a", font=F_MID, tags=("dyn",))
+        cv.create_text(W / 2, 578, text="ВЫЖИВАНИЕ: волны врагов · каждая 5-я — мини-босс",
+                       fill=COL_SAND, font=F_TINY, tags=("dyn",))
+        cv.create_text(W / 2, 600, text="+50 монет за воина · +100 за мини-босса · бонус за волну",
+                       fill=COL_SAND, font=F_TINY, tags=("dyn",))
+        self.ui.coins(cv, W / 2 - 40, 620, self.coins)
         self.ui.button(cv, 24, 24, 150, 70, "НАЗАД", self.goto_menu, font=F_SMALL)
 
     def draw_heroes(self, select_mode):
@@ -301,6 +312,8 @@ class Game(tk.Tk):
 
         self.ui.button(cv, 24, 24, 150, 70, "НАЗАД", self.goto_menu, font=F_SMALL)
         if select_mode:
+            if getattr(self, "next_mode", "bot") == "survival":
+                cv.create_text(W / 2, 650, text="РЕЖИМ: ВЫЖИВАНИЕ", fill="#ff8c1a", font=F_SMALL, tags=("dyn",))
             self.ui.button(cv, W / 2 - 150, 672, W / 2 + 150, 714, "В БОЙ!", self.start_fight, font=F_SMALL)
 
     def draw_shop(self):
@@ -359,7 +372,7 @@ class Game(tk.Tk):
             self.draw_shop()
         elif st == "fight":
             if self.arena is not None:
-                self.arena.draw(cv, self.coins)
+                self.arena.draw(cv, self.coins + (self.arena.run_reward if self.arena.survival else 0))
                 draw_ambient(cv, time.time(), self.arena.map)
                 draw_torches(cv, time.time(), self.arena.map)
                 if self.arena.phase == "end":
