@@ -59,9 +59,41 @@ def main():
 
     a = Arena("LIGHTY", "DEADY", 10, True)
     assert a.boss and a.b.scale > 1.2 and a.b.max_hp > 200
+    assert a.b.max_hp < 300 and a.b.dmg_mult < 2.0
     play(a, 8000, attack_every=9)
     assert a.phase == "end"
     print("boss ok, reward:", a.reward)
+
+    a = Arena("EMBERY", "DEADY", 1, False, survival=True)
+    assert a.survival and a.wave == 1 and not a.mini and a.b.is_bot
+    a.phase = "fight"
+    a.ai.update = lambda *args: None
+    a.b.hp = 1.0
+    a.register_hit(a.p, a.b, 50)
+    for _ in range(130):
+        a.update(1 / 60, dict(EMPTY_INP))
+    assert a.wave == 2 and a.run_reward == 60, (a.wave, a.run_reward)
+    assert a.phase == "intro" and not a.b.dead
+    print("survival wave clear ok")
+
+    a.wave = 5
+    a.spawn_wave()
+    assert a.mini and a.b.scale > 1.2 and a.b.max_hp > 200
+    a.phase = "fight"
+    a.b.hp = 1.0
+    a.register_hit(a.p, a.b, 50)
+    for _ in range(130):
+        a.update(1 / 60, dict(EMPTY_INP))
+    assert a.wave == 6 and a.run_reward == 60 + 150, (a.wave, a.run_reward)
+    print("survival mini-boss ok")
+
+    a.p.hp = 1.0
+    a.phase = "fight"
+    a.register_hit(a.b, a.p, 50)
+    for _ in range(130):
+        a.update(1 / 60, dict(EMPTY_INP))
+    assert a.phase == "end" and not a.win and a.reward == 210, (a.phase, a.reward)
+    print("survival end reward ok")
 
     a = Arena("DEADY", "LIGHTY", 3, False)
     a.phase = "fight"
