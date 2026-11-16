@@ -3,7 +3,7 @@
 import math
 import random
 
-from .config import (COMBO_MULT, COMBO_WINDOW, GROUND_Y, GRAVITY, MELEE_RANGE, W, WALL)
+from .config import (COMBO_MULT, COMBO_WINDOW, GROUND_Y, GRAVITY, W, WALL)
 from .heroes import HEROES
 from .util import clamp
 
@@ -19,6 +19,7 @@ class Fighter:
         self.x = float(x)
         self.y = float(GROUND_Y)
         self.vx = 0.0
+        self.vx_target = 0.0
         self.vy = 0.0
         self.kvx = 0.0
         self.facing = facing
@@ -49,9 +50,12 @@ class Fighter:
         self.base_speed = 1.0
         self.is_bot = False
         self.reaction = 0.5
+        self.flash_mult = 0.4
+        self.rage_mult = 1.5
+        self.has_scythe = any(ab.get("kind") == "scythe" for ab in self.h["abilities"])
 
     def out_mult(self):
-        return self.dmg_mult * (1.5 if self.buffs["rage"] > 0 else 1.0)
+        return self.dmg_mult * (self.rage_mult if self.buffs["rage"] > 0 else 1.0)
 
     def bbox(self):
         h = (self.H_CROUCH if (self.crouch and self.on_ground) else self.H_STAND) * self.scale
@@ -63,7 +67,7 @@ class Fighter:
             return
         if self.attack_cd > 0 or self.attack_t > 0:
             return
-        if self.key == "DEADY" and self.scythe_out:
+        if self.has_scythe and self.scythe_out:
             return
         if self.combo_t > 0:
             self.combo = (self.combo + 1) % 3
@@ -79,7 +83,7 @@ class Fighter:
         if self.dead or self.buffs["soul"] > 0:
             return
         if self.buffs["flash"] > 0:
-            dmg *= 0.4
+            dmg *= self.flash_mult
         self.hp = max(0.0, self.hp - dmg)
         self.hit_flash = 0.12
         self.hurt_t = 0.2
@@ -125,10 +129,11 @@ class Fighter:
                 self.vy = 0.0
                 self.on_ground = True
                 game.parts.dust(self.x, self.y)
+        self.vx += (self.vx_target - self.vx) * min(1.0, dt * 14.0)
         self.x += (self.vx + self.kvx) * dt
         self.kvx *= math.exp(-7 * dt)
         self.x = clamp(self.x, WALL + 30, W - WALL - 30)
-        if self.key == "LIGHTY" and random.random() < dt * 6:
+        if self.h["style"] == "glow" and random.random() < dt * 6:
             game.parts.spark(self.x + random.uniform(-26, 26) * self.scale,
                              self.y - random.uniform(30, 150) * self.scale)
         if self.dead and random.random() < dt * 8:
@@ -256,7 +261,8 @@ class Fighter:
 
         R(-14, head_t + bob, 14, head_b + bob, body)
 
-        if self.key == "DEADY":
+        style = C["style"]
+        if style == "hood":
             R(0, head_t + 6 + bob, 12, head_b - 2 + bob, body2)
             R(3, head_t + 11 + bob, 7, head_t + 16 + bob, accent)
             R(9, head_t + 11 + bob, 12, head_t + 16 + bob, accent)
@@ -264,15 +270,24 @@ class Fighter:
         else:
             R(2, head_t + 10 + bob, 7, head_t + 16 + bob, C["eye"])
             R(9, head_t + 10 + bob, 13, head_t + 16 + bob, C["eye"])
-            if self.key == "EMBERY" and not flash_hit:
+            if style == "flame" and not flash_hit:
                 for i, (dxo, hgt, col) in enumerate(((-8, 20, C["accent"]), (0, 30, C["glow"]), (8, 18, C["bone"]))):
                     fx0 = X + (dxo - 5) * s
                     fx1 = X + (dxo + 5) * s
                     tipy = Y + (head_t - hgt - 5 * math.sin(t * 12 + i * 2.1)) * s + bob
                     cv.create_polygon(fx0, Y + (head_t + 2) * s + bob, fx1, Y + (head_t + 2) * s + bob,
                                       X + dxo * s, tipy, fill=col, outline="", tags=("dyn",), **kw)
+            elif style == "spike" and not flash_hit:
+                for i in range(3):
+                    sx = -9 + i * 9
+                    tipy = Y + (head_t - 13 - 4 * math.sin(t * 6 + i * 1.9)) * s + bob
+                    cv.create_polygon(X + (sx - 4) * s, Y + (head_t + 2) * s + bob,
+                                      X + (sx + 4) * s, Y + (head_t + 2) * s + bob,
+                                      X + sx * s, tipy, fill=C["glow"], outline="", tags=("dyn",), **kw)
+            elif style == "plain" and not flash_hit:
+                R(-12, head_t - 5 + bob, 12, head_t + 3 + bob, accent)
 
-        if self.key == "LIGHTY" and not flash_hit:
+        if style == "glow" and not flash_hit:
             g = C["glow"]
             cv.create_rectangle(X - 32 * s, Y - 162 * s, X + 32 * s, Y + 4 * s,
                                 outline=g, width=2, tags=("dyn",), stipple="gray50")
@@ -282,13 +297,13 @@ class Fighter:
 
         if self.buffs["flash"] > 0:
             cv.create_oval(X - 55 * s, Y - 180 * s, X + 55 * s, Y + 10 * s,
-                           outline="#fff7b0", width=3, tags=("dyn",), stipple="gray25")
+                           outline=C["glow"], width=3, tags=("dyn",), stipple="gray25")
 
         if self.buffs["rage"] > 0:
             cv.create_rectangle(X - 30 * s, Y - 160 * s, X + 30 * s, Y + 4 * s,
-                                outline="#ff5a1a", width=3, tags=("dyn",), stipple="gray25")
+                                outline=C["accent"], width=3, tags=("dyn",), stipple="gray25")
 
-        if self.key == "DEADY" and not self.scythe_out and not soul:
+        if self.has_scythe and not self.scythe_out and not soul:
             if attacking:
                 hx, hy = X + fc * (14 + ext) * s, Y + (shoulder + 9 + bob) * s
                 ang = 1.5 - 2.2 * prog
