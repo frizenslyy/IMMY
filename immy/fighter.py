@@ -1,0 +1,314 @@
+"""IMMY — боец: физика, статы, комбо-атаки, баффы и процедурный пиксель-рендер."""
+
+import math
+import random
+
+from .config import (COMBO_MULT, COMBO_WINDOW, GROUND_Y, GRAVITY, MELEE_RANGE, W, WALL)
+from .heroes import HEROES
+from .util import clamp
+
+
+class Fighter:
+    W_BBOX = 36
+    H_STAND = 168
+    H_CROUCH = 114
+
+    def __init__(self, key, x, facing, scale=1.0):
+        self.key = key
+        self.h = HEROES[key]
+        self.x = float(x)
+        self.y = float(GROUND_Y)
+        self.vx = 0.0
+        self.vy = 0.0
+        self.kvx = 0.0
+        self.facing = facing
+        self.scale = scale
+        self.max_hp = 100.0
+        self.hp = 100.0
+        self.disp_hp = 100.0
+        self.on_ground = True
+        self.crouch = False
+        self.anim_t = random.uniform(0, 5)
+        self.attack_t = 0.0
+        self.attack_cd = 0.0
+        self.attack_kind = "melee"
+        self.combo = 0
+        self.combo_t = 0.0
+        self.hurt_t = 0.0
+        self.hit_flash = 0.0
+        self.stun_t = 0.0
+        self.dead = False
+        self.dead_t = 0.0
+        self.cds = [0.0, 0.0, 0.0]
+        self.buffs = {"flash": 0.0, "rage": 0.0, "soul": 0.0}
+        self.soul_target = None
+        self.scythe_out = False
+        self.speed_mult = 1.0
+        self.dmg_mult = 1.0
+        self.base_dmg = 1.0
+        self.base_speed = 1.0
+        self.is_bot = False
+        self.reaction = 0.5
+
+    def out_mult(self):
+        return self.dmg_mult * (1.5 if self.buffs["rage"] > 0 else 1.0)
+
+    def bbox(self):
+        h = (self.H_CROUCH if (self.crouch and self.on_ground) else self.H_STAND) * self.scale
+        w = self.W_BBOX * self.scale
+        return (self.x - w, self.y - h, self.x + w, self.y)
+
+    def start_attack(self, game):
+        if self.dead or self.stun_t > 0 or self.hurt_t > 0:
+            return
+        if self.attack_cd > 0 or self.attack_t > 0:
+            return
+        if self.key == "DEADY" and self.scythe_out:
+            return
+        if self.combo_t > 0:
+            self.combo = (self.combo + 1) % 3
+        else:
+            self.combo = 0
+        self.combo_t = COMBO_WINDOW
+        self.attack_t = 0.28
+        self.attack_cd = 0.42 if self.combo < 2 else 0.55
+        self.attack_kind = "melee"
+        game.melee.append([self, 0.12, self.combo])
+
+    def take_damage(self, dmg, kb_dir=0.0, stun=0.0, kb_force=None):
+        if self.dead or self.buffs["soul"] > 0:
+            return
+        if self.buffs["flash"] > 0:
+            dmg *= 0.4
+        self.hp = max(0.0, self.hp - dmg)
+        self.hit_flash = 0.12
+        self.hurt_t = 0.2
+        self.kvx += kb_dir * (240.0 if kb_force is None else kb_force)
+        if stun > 0:
+            self.stun_t = max(self.stun_t, stun)
+
+    def update(self, dt, foe, game):
+        self.anim_t += dt
+        if self.dead:
+            self.dead_t += dt
+        prev_soul = self.buffs["soul"]
+        for k in self.buffs:
+            if self.buffs[k] > 0:
+                self.buffs[k] = max(0.0, self.buffs[k] - dt)
+        if prev_soul > 0 and self.buffs["soul"] == 0 and self.soul_target is not None:
+            e = self.soul_target
+            self.x = clamp(e.x - e.facing * 95, WALL + 30, W - WALL - 30)
+            self.soul_target = None
+            game.parts.burst(self.x, self.y - 80 * self.scale, self.h["accent"], 14, 200)
+        for i in range(3):
+            self.cds[i] = max(0.0, self.cds[i] - dt)
+        self.attack_cd = max(0.0, self.attack_cd - dt)
+        self.attack_t = max(0.0, self.attack_t - dt)
+        self.hurt_t = max(0.0, self.hurt_t - dt)
+        self.hit_flash = max(0.0, self.hit_flash - dt)
+        self.stun_t = max(0.0, self.stun_t - dt)
+        if self.combo_t > 0:
+            self.combo_t = max(0.0, self.combo_t - dt)
+            if self.combo_t == 0:
+                self.combo = 0
+        if self.disp_hp > self.hp:
+            self.disp_hp = max(self.hp, self.disp_hp - 26.0 * dt)
+        else:
+            self.disp_hp = self.hp
+        if foe is not None and self.attack_t <= 0:
+            self.facing = 1 if foe.x >= self.x else -1
+        if not self.on_ground:
+            self.vy += GRAVITY * dt
+            self.y += self.vy * dt
+            if self.y >= GROUND_Y:
+                self.y = float(GROUND_Y)
+                self.vy = 0.0
+                self.on_ground = True
+                game.parts.dust(self.x, self.y)
+        self.x += (self.vx + self.kvx) * dt
+        self.kvx *= math.exp(-7 * dt)
+        self.x = clamp(self.x, WALL + 30, W - WALL - 30)
+        if self.key == "LIGHTY" and random.random() < dt * 6:
+            game.parts.spark(self.x + random.uniform(-26, 26) * self.scale,
+                             self.y - random.uniform(30, 150) * self.scale)
+        if self.dead and random.random() < dt * 8:
+            game.parts.rise(self.x, self.y, self.h["glow"])
+
+    def melee_damage(self, stage):
+        base = random.uniform(8, 13) * COMBO_MULT[min(stage, 2)]
+        return base * self.out_mult()
+
+    def draw_scythe(self, cv, hx, hy, ang, s, fc):
+        L = 78
+        ex = hx + fc * math.cos(ang) * L * s
+        ey = hy - math.sin(ang) * L * s
+        cv.create_line(hx, hy, ex, ey, fill="#6b4a2a", width=max(2, int(5 * s)), tags=("dyn",))
+        pts = [ex, ey,
+               ex + fc * 30 * s, ey - 16 * s,
+               ex + fc * 46 * s, ey + 4 * s,
+               ex + fc * 18 * s, ey + 20 * s]
+        cv.create_polygon(*pts, fill="#d7dee6", outline="#8a949e", tags=("dyn",))
+        tx = hx + fc * math.cos(ang + 0.5) * L * 0.6 * s
+        ty = hy - math.sin(ang + 0.5) * L * 0.6 * s
+        cv.create_line(hx, hy, tx, ty, fill="#ffffff", width=2, tags=("dyn",), stipple="gray25")
+
+    def render_dead(self, cv, X, Y, s, kw, body, body2):
+        lie = min(1.0, self.dead_t * 2.2)
+        drop = int(90 * lie)
+        cv.create_oval(X - 46 * s, Y - 10 * s, X + 46 * s, Y + 8 * s,
+                       fill="#000000", outline="", tags=("dyn",), stipple="gray50")
+        cv.create_rectangle(X - 40 * s, Y - 22 * s - drop * 0.1, X + 34 * s, Y - 2 * s,
+                            fill=body, outline="", tags=("dyn",), **kw)
+        cv.create_rectangle(X - 40 * s, Y - 10 * s, X + 34 * s, Y - 2 * s,
+                            fill=body2, outline="", tags=("dyn",), **kw)
+        hx = X + self.facing * 44 * s
+        cv.create_rectangle(hx - 13 * s, Y - 20 * s, hx + 13 * s, Y - 2 * s,
+                            fill=body, outline="", tags=("dyn",), **kw)
+        eye = self.h["eye"]
+        cv.create_rectangle(hx - 8 * s, Y - 14 * s, hx - 4 * s, Y - 10 * s,
+                            fill=eye, outline="", tags=("dyn",), **kw)
+        cv.create_rectangle(hx + 2 * s, Y - 14 * s, hx + 6 * s, Y - 10 * s,
+                            fill=eye, outline="", tags=("dyn",), **kw)
+        for i, fx in enumerate((-26, -6, 16)):
+            cv.create_rectangle(X + fx * s, Y - 30 * s - (i % 2) * 3, X + (fx + 12) * s, Y - 22 * s,
+                                fill=body2, outline="", tags=("dyn",), **kw)
+
+    def render(self, cv, ox=0.0, oy=0.0):
+        s = self.scale
+        t = self.anim_t
+        fc = self.facing
+        X = self.x + ox
+        Y = self.y + oy
+        C = self.h
+        dead = self.dead
+        soul = self.buffs["soul"] > 0
+        flash_hit = self.hit_flash > 0
+        st = "gray25" if (soul or dead) else None
+        kw = {"stipple": st} if st else {}
+
+        body = "#ffffff" if flash_hit else C["body"]
+        body2 = "#ffffff" if flash_hit else C["body2"]
+        bone = "#ffffff" if flash_hit else C["bone"]
+        accent = "#ffffff" if flash_hit else C["accent"]
+
+        if dead:
+            self.render_dead(cv, X, Y, s, kw, body, body2)
+            return
+
+        def R(dx0, dy0, dx1, dy1, color):
+            cv.create_rectangle(X + fc * dx0 * s, Y + dy0 * s, X + fc * dx1 * s, Y + dy1 * s,
+                                fill=color, outline="", tags=("dyn",), **kw)
+
+        cv.create_oval(X - 30 * s, Y - 6 * s, X + 30 * s, Y + 8 * s,
+                       fill="#000000", outline="", tags=("dyn",), stipple="gray50")
+
+        crouch = self.crouch and self.on_ground
+        walking = self.on_ground and abs(self.vx) > 10 and not crouch
+        airborne = not self.on_ground
+        ph = t * 11
+        bob = math.sin(ph * 2) * 2 * s if walking else 0.0
+
+        if crouch:
+            hip, leg_h = -38, 38
+            shoulder, head_b, head_t = -84, -88, -114
+        elif airborne:
+            hip, leg_h = -54, 36
+            shoulder, head_b, head_t = -120, -124, -152
+        else:
+            hip, leg_h = -54, 54
+            shoulder, head_b, head_t = -120, -124, -152
+
+        prog = 0.0
+        attacking = self.attack_t > 0 and self.attack_kind == "melee"
+        if attacking:
+            prog = 1 - self.attack_t / 0.28
+            X += fc * (9 + 4 * self.combo) * s * math.sin(prog * math.pi)
+
+        if walking:
+            sw = math.sin(ph) * 9
+            l1, l2 = -10 + sw, 10 - sw
+        elif airborne:
+            l1, l2 = -14, 12
+        else:
+            l1, l2 = -10, 10
+        R(l1 - 6, hip, l1 + 6, hip + leg_h, body2)
+        R(l2 - 6, hip, l2 + 6, hip + leg_h, body)
+        R(l1 - 7, hip + leg_h - 10, l1 + 7, hip + leg_h, C["bone"])
+        R(l2 - 7, hip + leg_h - 10, l2 + 7, hip + leg_h, C["bone"])
+
+        R(-19, shoulder + bob, 19, hip, body)
+        R(-19, hip - 8 + bob, 19, hip, accent)
+        R(-19, shoulder + bob, 19, shoulder + 12 + bob, body2)
+
+        ext = 0.0
+        if attacking:
+            ext = 22 + 46 * math.sin(prog * math.pi)
+            R(14, shoulder + 2 + bob, 14 + ext, shoulder + 15 + bob, body)
+            R(-26, shoulder + 6 + bob, -15, shoulder + 44 + bob, body2)
+            R(14 + ext - 8, shoulder - 1 + bob, 14 + ext + 2, shoulder + 18 + bob, C["bone"])
+        elif walking:
+            sw2 = math.sin(ph) * 5
+            R(15 + sw2, shoulder + 4 + bob, 26 + sw2, shoulder + 42 + bob, body)
+            R(-26 - sw2, shoulder + 4 + bob, -15 - sw2, shoulder + 42 + bob, body2)
+        else:
+            R(15, shoulder + 4 + bob, 26, shoulder + 42 + bob, body)
+            R(-26, shoulder + 4 + bob, -15, shoulder + 42 + bob, body2)
+
+        R(-14, head_t + bob, 14, head_b + bob, body)
+
+        if self.key == "DEADY":
+            R(0, head_t + 6 + bob, 12, head_b - 2 + bob, body2)
+            R(3, head_t + 11 + bob, 7, head_t + 16 + bob, accent)
+            R(9, head_t + 11 + bob, 12, head_t + 16 + bob, accent)
+            R(-4, hip - 40 + bob, 4, hip - 32 + bob, bone)
+        else:
+            R(2, head_t + 10 + bob, 7, head_t + 16 + bob, C["eye"])
+            R(9, head_t + 10 + bob, 13, head_t + 16 + bob, C["eye"])
+            if self.key == "EMBERY" and not flash_hit:
+                for i, (dxo, hgt, col) in enumerate(((-8, 20, C["accent"]), (0, 30, C["glow"]), (8, 18, C["bone"]))):
+                    fx0 = X + (dxo - 5) * s
+                    fx1 = X + (dxo + 5) * s
+                    tipy = Y + (head_t - hgt - 5 * math.sin(t * 12 + i * 2.1)) * s + bob
+                    cv.create_polygon(fx0, Y + (head_t + 2) * s + bob, fx1, Y + (head_t + 2) * s + bob,
+                                      X + dxo * s, tipy, fill=col, outline="", tags=("dyn",), **kw)
+
+        if self.key == "LIGHTY" and not flash_hit:
+            g = C["glow"]
+            cv.create_rectangle(X - 32 * s, Y - 162 * s, X + 32 * s, Y + 4 * s,
+                                outline=g, width=2, tags=("dyn",), stipple="gray50")
+            if (t * 14) % 2 < 1.3:
+                cv.create_rectangle(X - 38 * s, Y - 168 * s, X + 38 * s, Y + 8 * s,
+                                    outline=g, width=1, tags=("dyn",), stipple="gray25")
+
+        if self.buffs["flash"] > 0:
+            cv.create_oval(X - 55 * s, Y - 180 * s, X + 55 * s, Y + 10 * s,
+                           outline="#fff7b0", width=3, tags=("dyn",), stipple="gray25")
+
+        if self.buffs["rage"] > 0:
+            cv.create_rectangle(X - 30 * s, Y - 160 * s, X + 30 * s, Y + 4 * s,
+                                outline="#ff5a1a", width=3, tags=("dyn",), stipple="gray25")
+
+        if self.key == "DEADY" and not self.scythe_out and not soul:
+            if attacking:
+                hx, hy = X + fc * (14 + ext) * s, Y + (shoulder + 9 + bob) * s
+                ang = 1.5 - 2.2 * prog
+            else:
+                hx, hy = X + fc * 21 * s, Y + (shoulder + 40 + bob) * s
+                ang = 0.85 + math.sin(t * 2) * 0.05
+            self.draw_scythe(cv, hx, hy, ang, s, fc)
+
+        if attacking:
+            a0 = -45 if fc > 0 else 135
+            cv.create_arc(X - 78 * s, Y - 160 * s, X + 78 * s, Y - 4 * s, start=a0, extent=90,
+                          style="arc", outline=accent, width=4, tags=("dyn",))
+
+        if self.stun_t > 0:
+            hy0 = Y + (head_t - 16) * s
+            pts = []
+            for i in range(7):
+                pts += [X + (i - 3) * 7 * s, hy0 + (5 if i % 2 else -5) * s]
+            cv.create_line(*pts, fill="#ffd23f", width=3, tags=("dyn",))
+
+        if self.combo_t > 0 and self.combo >= 2 and self.attack_t > 0:
+            cv.create_text(X, Y + (head_t - 34) * s, text="COMBO x%d" % (self.combo + 1),
+                           fill=C["glow"], font=("Courier", 12, "bold"), tags=("dyn",))
