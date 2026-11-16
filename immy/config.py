@@ -22,7 +22,6 @@ F_SMALL = ("Courier", 13, "bold")
 F_TINY = ("Courier", 11)
 
 MENU_STOPS = [(0.0, (26, 5, 8)), (0.55, (122, 22, 10)), (1.0, (255, 140, 30))]
-FIGHT_STOPS = [(0.0, (16, 3, 8)), (0.55, (88, 14, 10)), (1.0, (190, 62, 16))]
 
 COL_GOLD = "#ffd23f"
 COL_ORANGE = "#ff8c1a"
@@ -30,10 +29,12 @@ COL_RED = "#ff3b14"
 COL_DEEPRED = "#ff4a1a"
 COL_DARK = "#1c0a08"
 COL_FRAME = "#7a1c10"
-COL_PARCH = "#e8c9a0"
 COL_SAND = "#c9a07a"
 
 MELEE_RANGE = 112
 COMBO_WINDOW = 0.9
 COMBO_MULT = (1.0, 1.18, 1.4)
 COMBO_KB = (240.0, 300.0, 420.0)
+
+MAX_PARTS = 150
+MAX_EMBERS = 24

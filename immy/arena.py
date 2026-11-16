@@ -4,18 +4,19 @@ import math
 import random
 
 from .ai import BotAI
-from .background import draw_hero_icon
+from .background import MAPS, draw_hero_icon
 from .config import (COMBO_KB, COL_DEEPRED, COL_DARK, COL_FRAME, COL_GOLD, COL_ORANGE, COL_RED, COL_SAND,
-                     F_BIG, F_HUGE, F_MID, F_SMALL, F_TINY, GROUND_Y, H, MELEE_RANGE, W)
+                     F_BIG, F_HUGE, F_MID, F_SMALL, F_TINY, GROUND_Y, H, MELEE_RANGE, W, WALL)
 from .fighter import Fighter
 from .particles import Particles
 from .util import clamp
 
 
 class Arena:
-    def __init__(self, player_key, bot_key, level, boss):
+    def __init__(self, player_key, bot_key, level, boss, map=None):
         self.level = level
         self.boss = boss
+        self.map = map if map is not None else random.choice(MAPS)
         self.round = 1
         self.wins_p = 0
         self.wins_b = 0
@@ -53,7 +54,7 @@ class Arena:
         for fighter, x, fc in ((self.p, W * 0.32, 1), (self.b, W * 0.68, -1)):
             fighter.x = float(x)
             fighter.y = float(GROUND_Y)
-            fighter.vx = fighter.vy = fighter.kvx = 0.0
+            fighter.vx = fighter.vx_target = fighter.vy = fighter.kvx = 0.0
             fighter.facing = fc
             fighter.hp = fighter.max_hp
             fighter.disp_hp = fighter.max_hp
@@ -111,11 +112,11 @@ class Arena:
 
         p, b = self.p, self.b
         if p.dead or p.stun_t > 0:
-            p.vx = 0.0
+            p.vx_target = 0.0
             p.crouch = False
         else:
             p.crouch = inp["crouch"] and p.on_ground
-            p.vx = inp["move"] * 300 * p.speed_mult * (0.45 if p.crouch else 1.0)
+            p.vx_target = inp["move"] * 300 * p.speed_mult * (0.45 if p.crouch else 1.0)
             if inp["jump"] and p.on_ground and not p.crouch:
                 p.vy = -920.0
                 p.on_ground = False
@@ -189,70 +190,69 @@ class Arena:
     def cast_ability(self, f, idx, foe):
         if f.dead or f.stun_t > 0 or self.phase != "fight":
             return False
-        if f.cds[idx] > 0:
+        abilities = f.h["abilities"]
+        if idx < 0 or idx >= len(abilities) or f.cds[idx] > 0:
             return False
-        if f.key == "DEADY":
-            if idx == 0:
-                if f.scythe_out:
-                    return False
-                f.cds[0] = 8
-                f.scythe_out = True
-                f.attack_t = 0.25
-                f.attack_kind = "cast"
-                self.proj.append({"kind": "scythe", "owner": f, "x": f.x + f.facing * 40 * f.scale,
-                                  "y": f.y - 110 * f.scale, "vx": 520 * f.facing, "dir": f.facing,
-                                  "phase": "out", "timer": 0.0, "traveled": 0.0, "dmg": 14, "spin": 0.0})
-                self.parts.burst(f.x + f.facing * 40, f.y - 110 * f.scale, "#cfd6dd", 6, 120)
-            elif idx == 1:
-                f.cds[1] = 10
-                f.attack_t = 0.25
-                f.attack_kind = "cast"
-                self.fx.append({"kind": "hand_warn", "x": foe.x, "owner": f, "t": 0.8, "dmg": 18})
-            else:
-                f.cds[2] = 14
-                f.buffs["soul"] = 1.2
-                f.soul_target = foe
-                self.parts.burst(f.x, f.y - 80 * f.scale, f.h["glow"], 16, 200)
-        elif f.key == "LIGHTY":
-            if idx == 0:
-                f.cds[0] = 9
-                f.attack_t = 0.3
-                f.attack_kind = "cast"
-                self.fx.append({"kind": "shock", "owner": f, "t": 0.3,
-                                "x0": f.x + f.facing * 30 * f.scale, "y0": f.y - 95 * f.scale})
-                if not foe.dead and foe.buffs["soul"] <= 0:
-                    dx = (foe.x - f.x) * f.facing
-                    if 0 <= dx <= 185 and abs(foe.y - f.y) < 170:
-                        dmg = 12 * f.out_mult()
-                        foe.take_damage(dmg, kb_dir=f.facing, stun=2.0)
-                        self.parts.burst(foe.x, foe.y - 100 * foe.scale, "#fff7b0", 14, 240)
-                        self.parts.dmg_text(foe.x, foe.y - 175 * foe.scale, dmg)
-                        self.shake = max(self.shake, 5)
-            elif idx == 1:
-                f.cds[1] = 11
-                f.attack_t = 0.25
-                f.attack_kind = "cast"
-                self.fx.append({"kind": "bolt_warn", "x": foe.x, "owner": f, "t": 0.9})
-            else:
-                f.cds[2] = 16
-                f.buffs["flash"] = 3.0
-                self.parts.burst(f.x, f.y - 90 * f.scale, "#fff7b0", 20, 260)
+        ab = abilities[idx]
+        k = ab["kind"]
+        if k == "scythe" and f.scythe_out:
+            return False
+        f.cds[idx] = ab["cd"]
+        f.attack_t = 0.25
+        f.attack_kind = "cast"
+        if k == "scythe":
+            f.scythe_out = True
+            self.proj.append({"kind": "scythe", "owner": f, "x": f.x + f.facing * 40 * f.scale,
+                              "y": f.y - 110 * f.scale, "vx": 520 * f.facing, "dir": f.facing,
+                              "phase": "out", "timer": 0.0, "traveled": 0.0, "dmg": ab.get("dmg", 14), "spin": 0.0})
+            self.parts.burst(f.x + f.facing * 40, f.y - 110 * f.scale, "#cfd6dd", 6, 120)
+        elif k == "hand":
+            self.fx.append({"kind": "hand_warn", "x": foe.x, "owner": f, "t": ab.get("warn", 0.8),
+                            "dmg": ab.get("dmg", 18)})
+        elif k == "soul":
+            f.buffs["soul"] = ab.get("dur", 1.2)
+            f.soul_target = foe
+            self.parts.burst(f.x, f.y - 80 * f.scale, f.h["glow"], 16, 200)
+        elif k == "orb":
+            self.proj.append({"kind": "orb", "owner": f, "x": f.x + f.facing * 44 * f.scale,
+                              "y": f.y - 100 * f.scale, "vx": ab.get("speed", 460) * f.facing,
+                              "dmg": ab.get("dmg", 12), "r": ab.get("r", 14), "color": f.h["accent"]})
+        elif k == "ground":
+            self.fx.append({"kind": "ground_warn", "x": foe.x, "owner": f, "t": ab.get("warn", 0.8),
+                            "dmg": ab.get("dmg", 18), "dodge": ab.get("dodge", "jump"),
+                            "color": f.h["glow"]})
+        elif k == "shock":
+            rng = ab.get("range", 170)
+            self.fx.append({"kind": "shock", "owner": f, "t": 0.3, "range": rng,
+                            "x0": f.x + f.facing * 30 * f.scale, "y0": f.y - 95 * f.scale})
+            if not foe.dead and foe.buffs["soul"] <= 0:
+                dx = (foe.x - f.x) * f.facing
+                if 0 <= dx <= rng and abs(foe.y - f.y) < 170:
+                    dmg = ab.get("dmg", 12) * f.out_mult()
+                    foe.take_damage(dmg, kb_dir=f.facing, stun=ab.get("stun", 1.5))
+                    self.parts.burst(foe.x, foe.y - 100 * foe.scale, f.h["glow"], 14, 240)
+                    self.parts.dmg_text(foe.x, foe.y - 175 * foe.scale, dmg)
+                    self.shake = max(self.shake, 5)
+        elif k == "buff_def":
+            f.buffs["flash"] = ab.get("dur", 3.0)
+            f.flash_mult = ab.get("mult", 0.4)
+            self.parts.burst(f.x, f.y - 90 * f.scale, f.h["glow"], 20, 260)
+        elif k == "buff_atk":
+            f.buffs["rage"] = ab.get("dur", 5.0)
+            f.rage_mult = ab.get("mult", 1.5)
+            self.parts.burst(f.x, f.y - 90 * f.scale, f.h["accent"], 20, 240)
+        elif k == "blink":
+            self.parts.burst(f.x, f.y - 85 * f.scale, f.h["glow"], 14, 220)
+            f.x = clamp(foe.x - foe.facing * 95, WALL + 30, W - WALL - 30)
+            self.parts.burst(f.x, f.y - 85 * f.scale, f.h["accent"], 14, 220)
+        elif k == "heal":
+            amount = ab.get("amount", 20)
+            f.hp = min(f.max_hp, f.hp + amount)
+            self.parts.rise(f.x, f.y, f.h["glow"])
+            self.parts.dmg_text(f.x, f.y - 180 * f.scale, amount, color="#8aff8a")
         else:
-            if idx == 0:
-                f.cds[0] = 6
-                f.attack_t = 0.25
-                f.attack_kind = "cast"
-                self.proj.append({"kind": "fireball", "owner": f, "x": f.x + f.facing * 44 * f.scale,
-                                  "y": f.y - 100 * f.scale, "vx": 460 * f.facing, "dmg": 13})
-            elif idx == 1:
-                f.cds[1] = 11
-                f.attack_t = 0.25
-                f.attack_kind = "cast"
-                self.fx.append({"kind": "pillar_warn", "x": foe.x, "owner": f, "t": 0.7})
-            else:
-                f.cds[2] = 16
-                f.buffs["rage"] = 5.0
-                self.parts.burst(f.x, f.y - 90 * f.scale, "#ff5a1a", 20, 240)
+            f.cds[idx] = 0.0
+            return False
         return True
 
     def update_proj(self, dt):
@@ -297,17 +297,17 @@ class Arena:
             else:
                 pr["x"] += pr["vx"] * dt
                 if random.random() < dt * 40:
-                    self.parts.trail(pr["x"], pr["y"] + random.uniform(-6, 6), "#ff8c1a")
-                if not foe.dead and foe.buffs["soul"] <= 0 and self.circ_hit(pr, foe, 30):
+                    self.parts.trail(pr["x"], pr["y"] + random.uniform(-6, 6), pr["color"])
+                if not foe.dead and foe.buffs["soul"] <= 0 and self.circ_hit(pr, foe, pr["r"] + 14):
                     dmg = pr["dmg"] * pr["owner"].out_mult()
                     foe.take_damage(dmg, kb_dir=pr["owner"].facing)
-                    self.parts.burst(pr["x"], pr["y"], "#ff7a1a", 16, 240)
+                    self.parts.burst(pr["x"], pr["y"], pr["color"], 14, 240)
                     self.parts.dmg_text(foe.x, foe.y - 170 * foe.scale, dmg)
                     self.shake = max(self.shake, 4)
                     self.proj.remove(pr)
                     continue
                 if pr["x"] < 20 or pr["x"] > W - 20:
-                    self.parts.burst(pr["x"], pr["y"], "#ff7a1a", 10, 180)
+                    self.parts.burst(pr["x"], pr["y"], pr["color"], 10, 180)
                     self.proj.remove(pr)
 
     def circ_hit(self, pr, foe, r):
@@ -330,26 +330,19 @@ class Arena:
                     self.shake = max(self.shake, 5)
                 fx["kind"] = "hand"
                 fx["t"] = 0.5
-            elif k == "bolt_warn":
+            elif k == "ground_warn":
                 foe = self.foe_of(fx["owner"])
-                if not foe.dead and foe.buffs["soul"] <= 0 and not foe.crouch and abs(foe.x - fx["x"]) < 58:
-                    dmg = 22 * fx["owner"].out_mult()
-                    foe.take_damage(dmg)
-                    self.parts.burst(fx["x"], GROUND_Y - 40, "#fff7b0", 18, 260)
-                    self.parts.dmg_text(fx["x"], GROUND_Y - 160, dmg)
-                    self.shake = max(self.shake, 7)
-                fx["kind"] = "bolt"
-                fx["t"] = 0.35
-            elif k == "pillar_warn":
-                foe = self.foe_of(fx["owner"])
-                if not foe.dead and foe.buffs["soul"] <= 0 and abs(foe.x - fx["x"]) < 58 and foe.y > GROUND_Y - 150:
-                    dmg = 20 * fx["owner"].out_mult()
-                    foe.take_damage(dmg)
-                    self.parts.burst(fx["x"], GROUND_Y - 80, "#ff7a1a", 18, 260)
-                    self.parts.dmg_text(fx["x"], GROUND_Y - 210, dmg)
-                    self.shake = max(self.shake, 6)
-                fx["kind"] = "pillar"
-                fx["t"] = 0.6
+                if not foe.dead and foe.buffs["soul"] <= 0 and abs(foe.x - fx["x"]) < 60:
+                    dodge = fx.get("dodge", "jump")
+                    safe = foe.crouch if dodge == "crouch" else foe.y <= GROUND_Y - 70
+                    if not safe:
+                        dmg = fx["dmg"] * fx["owner"].out_mult()
+                        foe.take_damage(dmg)
+                        self.parts.burst(fx["x"], GROUND_Y - 60, fx.get("color", "#ffd23f"), 18, 260)
+                        self.parts.dmg_text(fx["x"], GROUND_Y - 170, dmg)
+                        self.shake = max(self.shake, 7)
+                fx["kind"] = "ground"
+                fx["t"] = 0.4
             else:
                 self.fx.remove(fx)
 
@@ -376,16 +369,13 @@ class Arena:
                 r = 26 + 6 * math.sin(now * 12)
                 cv.create_oval(fx["x"] - r + ox, GROUND_Y - r * 0.5 + oy, fx["x"] + r + ox, GROUND_Y + r * 0.5 + oy,
                                outline="#ff2a1a", width=3, tags=("dyn",))
-            elif k == "bolt_warn":
-                cv.create_line(fx["x"] + ox, 0, fx["x"] + ox, GROUND_Y, fill="#ffd23f", width=2,
+            elif k == "ground_warn":
+                col = fx.get("color", "#ffd23f")
+                cv.create_line(fx["x"] + ox, 0, fx["x"] + ox, GROUND_Y, fill=col, width=2,
                                dash=(4, 8), tags=("dyn",))
-                r = 20 + 6 * math.sin(now * 14)
-                cv.create_oval(fx["x"] - r + ox, GROUND_Y - r * 0.4 + oy, fx["x"] + r + ox, GROUND_Y + r * 0.4 + oy,
-                               outline="#ffd23f", width=3, tags=("dyn",))
-            elif k == "pillar_warn":
-                r = 30 + 6 * math.sin(now * 13)
-                cv.create_oval(fx["x"] - r + ox, GROUND_Y - r * 0.5 + oy, fx["x"] + r + ox, GROUND_Y + r * 0.5 + oy,
-                               outline="#ff8c1a", width=3, tags=("dyn",))
+                r = 24 + 6 * math.sin(now * 14)
+                cv.create_oval(fx["x"] - r + ox, GROUND_Y - r * 0.45 + oy, fx["x"] + r + ox, GROUND_Y + r * 0.45 + oy,
+                               outline=col, width=3, tags=("dyn",))
             elif k == "hand":
                 p = 1 - fx["t"] / 0.5
                 hgt = 95 * min(1.0, p * 5) * (1.0 if fx["t"] > 0.12 else fx["t"] / 0.12)
@@ -397,30 +387,20 @@ class Arena:
                 for fdx in (-10, 0, 10):
                     cv.create_rectangle(x + fdx - 4 + ox, GROUND_Y - hgt - 16 + oy, x + fdx + 4 + ox, GROUND_Y - hgt + oy,
                                         fill="#e8e4d0", outline="", tags=("dyn",))
-            elif k == "bolt":
-                pts = []
-                n = 12
-                for i in range(n + 1):
-                    yy = GROUND_Y * i / n
-                    xx = fx["x"] + (random.uniform(-16, 16) if 0 < i < n else 0)
-                    pts += [xx + ox, yy + oy]
-                cv.create_line(*pts, fill="#ffd23f", width=10, tags=("dyn",), stipple="gray50")
-                cv.create_line(*pts, fill="#fff7cc", width=4, tags=("dyn",))
-                cv.create_oval(fx["x"] - 40 + ox, GROUND_Y - 14 + oy, fx["x"] + 40 + ox, GROUND_Y + 10 + oy,
-                               fill="#fff7cc", outline="", tags=("dyn",), stipple="gray50")
-            elif k == "pillar":
+            elif k == "ground":
+                col = fx.get("color", "#ff8c1a")
                 flick = random.uniform(0.8, 1.2)
                 cv.create_rectangle(fx["x"] - 26 * flick + ox, GROUND_Y - 230 + oy, fx["x"] + 26 * flick + ox, GROUND_Y + oy,
-                                    fill="#ff5a1a", stipple="gray50", outline="", tags=("dyn",))
+                                    fill=col, stipple="gray50", outline="", tags=("dyn",))
                 cv.create_rectangle(fx["x"] - 12 * flick + ox, GROUND_Y - 230 + oy, fx["x"] + 12 * flick + ox, GROUND_Y + oy,
-                                    fill="#ffd23f", outline="", tags=("dyn",))
+                                    fill="#ffffff", stipple="gray25", outline="", tags=("dyn",))
             elif k == "shock":
                 f = fx["owner"]
                 x0, y0 = fx["x0"] + ox, fx["y0"] + oy
                 pts = [x0, y0]
                 for i in range(1, 7):
                     tt = i / 6
-                    pts += [x0 + f.facing * 185 * tt, y0 + random.uniform(-16, 16) * (1 - tt)]
+                    pts += [x0 + f.facing * fx.get("range", 185) * tt, y0 + random.uniform(-16, 16) * (1 - tt)]
                 cv.create_line(*pts, fill="#ffd23f", width=9, tags=("dyn",), stipple="gray50")
                 cv.create_line(*pts, fill="#fff7b0", width=4, tags=("dyn",))
 
@@ -430,9 +410,11 @@ class Arena:
                 self.draw_scythe_at(cv, pr["x"] + ox, pr["y"] + oy, pr["spin"])
             else:
                 x, y = pr["x"] + ox, pr["y"] + oy
-                cv.create_oval(x - 16, y - 16, x + 16, y + 16, fill="#ff5a1a", outline="#ffd23f",
+                r = pr.get("r", 14)
+                cv.create_oval(x - r, y - r, x + r, y + r, fill=pr.get("color", "#ff5a1a"), outline="#ffd23f",
                                width=2, tags=("dyn",))
-                cv.create_oval(x - 8, y - 8, x + 8, y + 8, fill="#fff7b0", outline="", tags=("dyn",))
+                cv.create_oval(x - r * 0.5, y - r * 0.5, x + r * 0.5, y + r * 0.5, fill="#fff7b0",
+                               outline="", tags=("dyn",))
 
     def hp_bar(self, cv, x, w, f, align_left):
         frac = clamp(f.hp / f.max_hp, 0.0, 1.0)
@@ -475,7 +457,8 @@ class Arena:
         x0 = W // 2 - total // 2
         for i in range(3):
             x = x0 + i * 66
-            nm, _, cdmax = self.p.h["abilities"][i]
+            ab = self.p.h["abilities"][i]
+            nm, cdmax = ab["name"], ab["cd"]
             frac = self.p.cds[i] / cdmax if cdmax else 0.0
             ready = self.p.cds[i] <= 0
             cv.create_rectangle(x, H - 76, x + 60, H - 16, fill=COL_DARK,
