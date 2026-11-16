@@ -63,11 +63,17 @@ class Particles:
                            "vx": random.uniform(-15, 15), "vy": random.uniform(-90, -40),
                            "t": 0.9, "life": 0.9, "color": color, "r": 3.0, "g": -60})
 
-    def dmg_text(self, x, y, n, color=COL_GOLD, big=False):
+    def dmg_text(self, x, y, n, color=COL_GOLD, big=False, txt=None):
         if not self._room(1):
             return
         self.items.append({"kind": "text", "x": x, "y": y, "vy": -80, "t": 0.9, "life": 0.9,
-                           "txt": str(int(n)), "color": color, "big": big})
+                           "txt": txt if txt is not None else str(int(n)), "color": color, "big": big})
+
+    def ring(self, x, y, color, r0=6, r1=46, t=0.35):
+        if not self._room(1):
+            return
+        self.items.append({"kind": "ring", "x": x, "y": y, "vx": 0, "vy": 0, "g": 0,
+                           "t": t, "life": t, "color": color, "r": r0, "r1": r1})
 
     def update(self, dt):
         update_parts(self.items, dt)
@@ -83,6 +89,12 @@ class Particles:
                                fill="#2a0503", font=f, tags=("dyn",))
                 cv.create_text(q["x"] + ox, q["y"] + oy, text=q["txt"],
                                fill=q.get("color", COL_GOLD), font=f, tags=("dyn",))
+            elif q.get("kind") == "ring":
+                k = 1.0 - q["t"] / q["life"]
+                r = q["r"] + (q["r1"] - q["r"]) * k
+                w = max(1, int(4 * (1.0 - k)))
+                cv.create_oval(q["x"] - r + ox, q["y"] - r + oy, q["x"] + r + ox, q["y"] + r + oy,
+                               outline=q["color"], width=w, tags=("dyn",))
             else:
                 r = q["r"] * max(0.35, q["t"] / q["life"])
                 cv.create_oval(q["x"] - r + ox, q["y"] - r + oy, q["x"] + r + ox, q["y"] + r + oy,

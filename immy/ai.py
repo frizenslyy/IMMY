@@ -44,19 +44,26 @@ class BotAI:
         if f.dead or f.stun_t > 0 or game.phase != "fight":
             f.vx_target = 0.0
             return
+        if f.root_t > 0:
+            f.vx_target = 0.0
+            f.crouch = False
+            return
         self.t -= dt
         dist = abs(foe.x - f.x)
         d = 1 if foe.x > f.x else -1
+        if foe.attack_t > 0 and dist < 180 and f.parry_cd <= 0:
+            if random.random() < self.level * 0.010:
+                f.try_parry()
         if self.t <= 0:
             self.t = f.reaction * random.uniform(0.7, 1.4)
             self.think(dist, d, foe, game)
         self.dodge_check(game, foe)
-        f.vx_target = self.move * 270 * f.speed_mult
+        f.vx_target = self.move * 280 * f.eff_speed()
         f.crouch = self.crouch and f.on_ground
         if self.jump:
             self.jump = False
             if f.on_ground and not f.crouch:
-                f.vy = -900.0
+                f.vy = -960.0
                 f.on_ground = False
         if self.want_attack:
             self.want_attack = False
@@ -131,5 +138,57 @@ class BotAI:
                     return
             elif k == "buff_atk":
                 if dist < 260 and random.random() < 0.5:
+                    try_c(f, i, foe)
+                    return
+            elif k == "buff_spd":
+                if dist > 300 and random.random() < 0.5:
+                    try_c(f, i, foe)
+                    return
+            elif k == "wave":
+                if dist > 200 and random.random() < 0.5:
+                    try_c(f, i, foe)
+                    return
+            elif k == "rain":
+                if dist > 140 and random.random() < 0.45:
+                    try_c(f, i, foe)
+                    return
+            elif k == "snare":
+                if dist > 160 and random.random() < 0.55:
+                    try_c(f, i, foe)
+                    return
+            elif k == "summon":
+                if dist < 340 and random.random() < 0.5:
+                    try_c(f, i, foe)
+                    return
+            elif k == "poison":
+                if dist < ab.get("range", 420) and random.random() < 0.5:
+                    try_c(f, i, foe)
+                    return
+            elif k == "strike":
+                if dist < ab.get("range", 150) and random.random() < 0.6:
+                    try_c(f, i, foe)
+                    return
+            elif k == "pull":
+                if dist > 240 and random.random() < 0.5:
+                    try_c(f, i, foe)
+                    return
+            elif k == "guard":
+                if foe.attack_t > 0 and dist < 200 and random.random() < 0.5:
+                    try_c(f, i, foe)
+                    return
+            elif k == "drain":
+                if dist < ab.get("range", 220) and random.random() < 0.5:
+                    try_c(f, i, foe)
+                    return
+            elif k == "drain_aura":
+                if dist < 280 and random.random() < 0.5:
+                    try_c(f, i, foe)
+                    return
+            elif k == "leap":
+                if dist > 200 and random.random() < 0.45:
+                    try_c(f, i, foe)
+                    return
+            elif k == "beam":
+                if dist < ab.get("range", 520) and random.random() < 0.55:
                     try_c(f, i, foe)
                     return

@@ -6,7 +6,8 @@ import random
 from .ai import BotAI
 from .background import MAPS, draw_hero_icon
 from .config import (COMBO_KB, COL_DEEPRED, COL_DARK, COL_FRAME, COL_GOLD, COL_ORANGE, COL_RED, COL_SAND,
-                     F_BIG, F_HUGE, F_MID, F_SMALL, F_TINY, GROUND_Y, H, MELEE_RANGE, W, WALL)
+                     CRIT_MULT, F_BIG, F_HUGE, F_MID, F_SMALL, F_TINY, GROUND_Y, H, MELEE_RANGE,
+                     PARRY_CD, PARRY_STUN, W, WALL)
 from .fighter import Fighter
 from .particles import Particles
 from .util import clamp
@@ -60,15 +61,19 @@ class Arena:
             fighter.disp_hp = fighter.max_hp
             fighter.dead = False
             fighter.dead_t = 0.0
-            fighter.cds = [0.0, 0.0, 0.0]
+            fighter.cds = [0.0] * len(fighter.h["abilities"])
             fighter.crouch = False
             fighter.on_ground = True
             fighter.combo = 0
             fighter.combo_t = 0.0
             fighter.stun_t = fighter.hurt_t = fighter.attack_t = fighter.attack_cd = 0.0
             fighter.scythe_out = False
-            fighter.buffs = {"flash": 0.0, "rage": 0.0, "soul": 0.0}
+            fighter.buffs = {"flash": 0.0, "rage": 0.0, "soul": 0.0,
+                             "guard": 0.0, "swift": 0.0, "vamp": 0.0}
             fighter.soul_target = None
+            fighter.parry_t = fighter.parry_cd = fighter.parry_flash = 0.0
+            fighter.root_t = 0.0
+            fighter.poison_t = fighter.poison_dps = fighter.poison_tick = 0.0
         self.b.dmg_mult = self.b.base_dmg * (1.25 if self.round >= 2 else 1.0)
         self.b.speed_mult = self.b.base_speed * (1.15 if self.round >= 2 else 1.0)
         self.proj = []
@@ -116,12 +121,14 @@ class Arena:
             p.crouch = False
         else:
             p.crouch = inp["crouch"] and p.on_ground
-            p.vx_target = inp["move"] * 300 * p.speed_mult * (0.45 if p.crouch else 1.0)
+            p.vx_target = inp["move"] * 330 * p.eff_speed() * (0.45 if p.crouch else 1.0)
             if inp["jump"] and p.on_ground and not p.crouch:
-                p.vy = -920.0
+                p.vy = -960.0
                 p.on_ground = False
             if inp["attack"]:
                 p.start_attack(self)
+            if inp.get("parry"):
+                p.try_parry()
             if inp["cast"] is not None:
                 self.cast_ability(p, inp["cast"], b)
         self.ai.update(dt, p, self)
@@ -160,15 +167,48 @@ class Arena:
             self.phase = "ko"
             self.phase_t = 1.8
 
-    def register_hit(self, att, foe, dmg, heavy=False):
-        foe.take_damage(dmg, kb_dir=att.facing)
-        self.parts.burst(foe.x - foe.facing * 12, foe.y - 95 * foe.scale, "#ffd23f", 10, 220)
-        self.parts.dmg_text(foe.x, foe.y - 170 * foe.scale, dmg, big=heavy)
-        self.shake = max(self.shake, 7 if heavy else 5)
-        self.hitstop = max(self.hitstop, 0.09 if heavy else 0.05)
+    def register_hit(self, att, foe, base, heavy=False, kb_force=None, stun=0.0, force_crit=False):
+        if foe.dead:
+            return "miss", 0.0
+        if force_crit:
+            dmg = base * att.stat_dmg * att.out_mult() * CRIT_MULT
+            crit = True
+        else:
+            dmg, crit = att.roll_damage(base)
+        res = foe.take_damage(dmg, kb_dir=att.facing, stun=stun, kb_force=kb_force)
+        if res == "parry":
+            att.stun_t = max(att.stun_t, PARRY_STUN)
+            att.attack_t = 0.0
+            self.parts.ring(foe.x, foe.y - 95 * foe.scale, "#ffd23f", 8, 58, 0.35)
+            self.parts.dmg_text(foe.x, foe.y - 195 * foe.scale, 0, txt="ПАРИРОВАНИЕ",
+                                color="#ffd23f", big=True)
+            self.shake = max(self.shake, 4)
+            return res, 0.0
+        if res == "guard":
+            self.parts.ring(foe.x, foe.y - 95 * foe.scale, foe.h["glow"], 30, 52, 0.25)
+            self.parts.dmg_text(foe.x, foe.y - 185 * foe.scale, 0, txt="БЛОК", color="#b0baf0")
+            return res, 0.0
+        if res != "hit":
+            return res, 0.0
+        if crit:
+            self.parts.burst(foe.x - foe.facing * 12, foe.y - 95 * foe.scale, "#fff2b0", 14, 260)
+            self.parts.dmg_text(foe.x, foe.y - 185 * foe.scale, dmg, color="#ff5a1a", big=True)
+            self.parts.ring(foe.x, foe.y - 95 * foe.scale, "#ff5a1a", 10, 60, 0.3)
+            self.shake = max(self.shake, 10)
+            self.hitstop = max(self.hitstop, 0.12)
+        else:
+            self.parts.burst(foe.x - foe.facing * 12, foe.y - 95 * foe.scale, "#ffd23f", 10, 220)
+            self.parts.dmg_text(foe.x, foe.y - 170 * foe.scale, dmg, big=heavy)
+            self.shake = max(self.shake, 7 if heavy else 5)
+            self.hitstop = max(self.hitstop, 0.09 if heavy else 0.05)
+        if att.buffs["vamp"] > 0 and att.vamp_pct > 0:
+            heal = dmg * att.vamp_pct
+            att.hp = min(att.max_hp, att.hp + heal)
+            self.parts.dmg_text(att.x, att.y - 205 * att.scale, heal, color="#8aff8a")
         if att is self.p:
             self.combo_count += 1
             self.combo_show = 1.2
+        return res, dmg
 
     def do_melee(self, att, stage=0):
         foe = self.foe_of(att)
@@ -182,10 +222,8 @@ class Arena:
         b0, b1 = foe.bbox()[1], foe.bbox()[3]
         if a_top > b1 or att.y < b0:
             return
-        heavy = stage >= 2
-        dmg = att.melee_damage(stage)
-        foe.take_damage(dmg, kb_dir=att.facing, kb_force=COMBO_KB[min(stage, 2)])
-        self.register_hit(att, foe, dmg, heavy=heavy)
+        self.register_hit(att, foe, att.melee_damage(stage), heavy=stage >= 2,
+                          kb_force=COMBO_KB[min(stage, 2)])
 
     def cast_ability(self, f, idx, foe):
         if f.dead or f.stun_t > 0 or self.phase != "fight":
@@ -214,13 +252,20 @@ class Arena:
             f.soul_target = foe
             self.parts.burst(f.x, f.y - 80 * f.scale, f.h["glow"], 16, 200)
         elif k == "orb":
-            self.proj.append({"kind": "orb", "owner": f, "x": f.x + f.facing * 44 * f.scale,
-                              "y": f.y - 100 * f.scale, "vx": ab.get("speed", 460) * f.facing,
-                              "dmg": ab.get("dmg", 12), "r": ab.get("r", 14), "color": f.h["accent"]})
+            n = ab.get("count", 1)
+            spread = ab.get("spread", 0)
+            for i in range(n):
+                yy = f.y - 100 * f.scale + (i - (n - 1) / 2.0) * spread
+                self.proj.append({"kind": "orb", "owner": f, "x": f.x + f.facing * 44 * f.scale,
+                                  "y": yy, "vx": ab.get("speed", 460) * f.facing,
+                                  "dmg": ab.get("dmg", 12), "r": ab.get("r", 14),
+                                  "color": f.h["accent"], "poison": ab.get("poison", 0.0),
+                                  "poison_dur": ab.get("poison_dur", 3.0)})
         elif k == "ground":
             self.fx.append({"kind": "ground_warn", "x": foe.x, "owner": f, "t": ab.get("warn", 0.8),
                             "dmg": ab.get("dmg", 18), "dodge": ab.get("dodge", "jump"),
-                            "color": f.h["glow"]})
+                            "radius": ab.get("radius", 60), "heavy": ab.get("heavy", False),
+                            "stun": ab.get("stun", 0), "color": f.h["glow"]})
         elif k == "shock":
             rng = ab.get("range", 170)
             self.fx.append({"kind": "shock", "owner": f, "t": 0.3, "range": rng,
@@ -228,10 +273,8 @@ class Arena:
             if not foe.dead and foe.buffs["soul"] <= 0:
                 dx = (foe.x - f.x) * f.facing
                 if 0 <= dx <= rng and abs(foe.y - f.y) < 170:
-                    dmg = ab.get("dmg", 12) * f.out_mult()
-                    foe.take_damage(dmg, kb_dir=f.facing, stun=ab.get("stun", 1.5))
+                    self.register_hit(f, foe, ab.get("dmg", 12), stun=ab.get("stun", 1.5))
                     self.parts.burst(foe.x, foe.y - 100 * foe.scale, f.h["glow"], 14, 240)
-                    self.parts.dmg_text(foe.x, foe.y - 175 * foe.scale, dmg)
                     self.shake = max(self.shake, 5)
         elif k == "buff_def":
             f.buffs["flash"] = ab.get("dur", 3.0)
@@ -250,6 +293,89 @@ class Arena:
             f.hp = min(f.max_hp, f.hp + amount)
             self.parts.rise(f.x, f.y, f.h["glow"])
             self.parts.dmg_text(f.x, f.y - 180 * f.scale, amount, color="#8aff8a")
+        elif k == "snare":
+            self.proj.append({"kind": "snare", "owner": f, "x": f.x + f.facing * 44 * f.scale,
+                              "y": f.y - 100 * f.scale, "vx": ab.get("speed", 620) * f.facing,
+                              "dmg": ab.get("dmg", 4), "r": ab.get("r", 14),
+                              "dur": ab.get("dur", 1.0), "color": f.h["accent"]})
+        elif k == "summon":
+            self.fx.append({"kind": "summon", "owner": f, "t": ab.get("dur", 2.0),
+                            "dmg": ab.get("dmg", 5), "count": ab.get("count", 3), "bite_t": 0.4})
+            self.parts.burst(f.x, f.y - 40 * f.scale, f.h["accent"], 12, 180)
+        elif k == "poison":
+            rng = ab.get("range", 420)
+            self.fx.append({"kind": "poison", "owner": f, "t": 0.4, "x": foe.x})
+            if not foe.dead and foe.buffs["soul"] <= 0 and abs(foe.x - f.x) <= rng:
+                dur = ab.get("dur", 4.0)
+                foe.poison_t = dur
+                foe.poison_dps = ab.get("pct", 0.08) * foe.max_hp / dur
+                self.parts.burst(foe.x, foe.y - 90 * foe.scale, "#7ad12a", 16, 200)
+                self.parts.dmg_text(foe.x, foe.y - 190 * foe.scale, 0, txt="ЯД", color="#7ad12a")
+        elif k == "strike":
+            rng = ab.get("range", 150)
+            self.fx.append({"kind": "strike", "owner": f, "t": 0.25, "x0": f.x, "range": rng})
+            dx = (foe.x - f.x) * f.facing
+            if not foe.dead and foe.buffs["soul"] <= 0 and 0 <= dx <= rng:
+                self.register_hit(f, foe, ab.get("dmg", 24), force_crit=True, kb_force=380)
+        elif k == "pull":
+            rng = ab.get("range", 460)
+            self.fx.append({"kind": "pull", "owner": f, "t": 0.45})
+            if not foe.dead and foe.buffs["soul"] <= 0 and abs(foe.x - f.x) <= rng:
+                foe.kvx += (1 if f.x > foe.x else -1) * 520
+                self.register_hit(f, foe, ab.get("dmg", 5))
+        elif k == "guard":
+            f.buffs["guard"] = ab.get("dur", 1.4)
+            self.parts.ring(f.x, f.y - 90 * f.scale, f.h["glow"], 20, 70, 0.4)
+        elif k == "buff_spd":
+            f.buffs["swift"] = ab.get("dur", 5.0)
+            self.parts.burst(f.x, f.y - 90 * f.scale, f.h["glow"], 16, 220)
+        elif k == "drain":
+            rng = ab.get("range", 220)
+            self.fx.append({"kind": "drain", "owner": f, "t": 0.4, "tx": foe.x,
+                            "ty": foe.y - 90 * foe.scale})
+            if not foe.dead and foe.buffs["soul"] <= 0 and abs(foe.x - f.x) <= rng:
+                res, dmg = self.register_hit(f, foe, ab.get("dmg", 16))
+                if res == "hit":
+                    heal = dmg * ab.get("heal_pct", 0.6)
+                    f.hp = min(f.max_hp, f.hp + heal)
+                    self.parts.dmg_text(f.x, f.y - 205 * f.scale, heal, color="#8aff8a")
+        elif k == "drain_aura":
+            f.buffs["vamp"] = ab.get("dur", 5.0)
+            f.vamp_pct = ab.get("vamp_pct", 0.45)
+            self.parts.burst(f.x, f.y - 90 * f.scale, "#8aff8a", 16, 220)
+        elif k == "leap":
+            d = 1 if foe.x > f.x else -1
+            f.vy = -820.0
+            f.on_ground = False
+            f.vx_target = d * 620.0
+            self.fx.append({"kind": "leap", "owner": f, "t": 0.55, "dmg": ab.get("dmg", 20),
+                            "radius": ab.get("radius", 120)})
+        elif k == "beam":
+            rng = ab.get("range", 520)
+            self.fx.append({"kind": "beam", "owner": f, "t": 0.28, "x0": f.x + f.facing * 30 * f.scale,
+                            "y0": f.y - 100 * f.scale, "range": rng})
+            if not foe.dead and foe.buffs["soul"] <= 0:
+                dx = (foe.x - f.x) * f.facing
+                if 0 <= dx <= rng and not (foe.crouch and foe.on_ground):
+                    self.register_hit(f, foe, ab.get("dmg", 20), heavy=True)
+                    self.shake = max(self.shake, 8)
+        elif k == "wave":
+            n = ab.get("count", 3)
+            gap = ab.get("gap", 0.14)
+            for i in range(n):
+                self.fx.append({"kind": "ground_warn",
+                                "x": clamp(f.x + f.facing * (120 + i * 130), WALL + 40, W - WALL - 40),
+                                "owner": f, "t": ab.get("warn", 0.7) + i * gap,
+                                "dmg": ab.get("dmg", 14), "dodge": ab.get("dodge", "jump"),
+                                "color": f.h["glow"]})
+        elif k == "rain":
+            n = ab.get("count", 4)
+            for i in range(n):
+                self.fx.append({"kind": "ground_warn",
+                                "x": clamp(foe.x + random.uniform(-150, 150), WALL + 40, W - WALL - 40),
+                                "owner": f, "t": ab.get("warn", 0.8) + i * 0.15,
+                                "dmg": ab.get("dmg", 10), "dodge": ab.get("dodge", "crouch"),
+                                "color": f.h["glow"]})
         else:
             f.cds[idx] = 0.0
             return False
@@ -264,9 +390,7 @@ class Arena:
                     pr["x"] += pr["vx"] * dt
                     pr["traveled"] += abs(pr["vx"] * dt)
                     if not foe.dead and foe.buffs["soul"] <= 0 and self.circ_hit(pr, foe, 26):
-                        dmg = pr["dmg"] * pr["owner"].out_mult()
-                        foe.take_damage(dmg, kb_dir=pr["owner"].facing)
-                        self.parts.dmg_text(foe.x, foe.y - 170 * foe.scale, dmg)
+                        self.register_hit(pr["owner"], foe, pr["dmg"])
                         self.parts.burst(pr["x"], pr["y"], "#cfd6dd", 10, 200)
                         pr["phase"] = "hold"
                         pr["timer"] = 3.0
@@ -291,18 +415,21 @@ class Arena:
                     pr["x"] += dxx / dd * sp
                     pr["y"] += dyy / dd * sp
                     if not foe.dead and foe.buffs["soul"] <= 0 and self.circ_hit(pr, foe, 24):
-                        dmg = pr["dmg"] * 0.7 * pr["owner"].out_mult()
-                        foe.take_damage(dmg, kb_dir=1 if dxx > 0 else -1)
-                        self.parts.dmg_text(foe.x, foe.y - 170 * foe.scale, dmg)
+                        self.register_hit(pr["owner"], foe, pr["dmg"] * 0.7)
             else:
                 pr["x"] += pr["vx"] * dt
                 if random.random() < dt * 40:
                     self.parts.trail(pr["x"], pr["y"] + random.uniform(-6, 6), pr["color"])
                 if not foe.dead and foe.buffs["soul"] <= 0 and self.circ_hit(pr, foe, pr["r"] + 14):
-                    dmg = pr["dmg"] * pr["owner"].out_mult()
-                    foe.take_damage(dmg, kb_dir=pr["owner"].facing)
+                    self.register_hit(pr["owner"], foe, pr["dmg"])
+                    if pr["kind"] == "snare":
+                        foe.root_t = max(foe.root_t, pr["dur"])
+                        self.parts.ring(foe.x, foe.y - 10, pr["color"], 14, 52, 0.35)
+                        self.parts.dmg_text(foe.x, foe.y - 190 * foe.scale, 0, txt="СВЯЗАН", color=pr["color"])
+                    elif pr.get("poison"):
+                        foe.poison_t = pr.get("poison_dur", 3.0)
+                        foe.poison_dps = pr["poison"] * foe.max_hp / pr.get("poison_dur", 3.0)
                     self.parts.burst(pr["x"], pr["y"], pr["color"], 14, 240)
-                    self.parts.dmg_text(foe.x, foe.y - 170 * foe.scale, dmg)
                     self.shake = max(self.shake, 4)
                     self.proj.remove(pr)
                     continue
@@ -316,30 +443,59 @@ class Arena:
 
     def update_fx(self, dt):
         for fx in self.fx[:]:
-            fx["t"] -= dt
             k = fx["kind"]
+            if k == "summon":
+                fx["t"] -= dt
+                fx["bite_t"] -= dt
+                if fx["bite_t"] <= 0:
+                    fx["bite_t"] = 0.5
+                    foe = self.foe_of(fx["owner"])
+                    if not foe.dead and foe.buffs["soul"] <= 0 and abs(foe.x - fx["owner"].x) < 420:
+                        self.register_hit(fx["owner"], foe, fx.get("dmg", 5))
+                if fx["t"] <= 0:
+                    self.fx.remove(fx)
+                continue
+            if k == "leap":
+                fx["t"] -= dt
+                if fx["t"] <= 0:
+                    f = fx["owner"]
+                    foe = self.foe_of(f)
+                    if not foe.dead and foe.buffs["soul"] <= 0 and abs(foe.x - f.x) <= fx["radius"] \
+                            and abs(foe.y - f.y) < 220:
+                        self.register_hit(f, foe, fx.get("dmg", 20), heavy=True, kb_force=420)
+                    self.parts.burst(f.x, GROUND_Y - 20, f.h["glow"], 20, 300)
+                    self.parts.ring(f.x, GROUND_Y - 10, f.h["accent"], 12, fx["radius"], 0.4)
+                    self.shake = max(self.shake, 9)
+                    self.fx.remove(fx)
+                continue
+            if k == "pull":
+                fx["t"] -= dt
+                foe = self.foe_of(fx["owner"])
+                if not foe.dead and foe.buffs["soul"] <= 0 and foe.root_t <= 0:
+                    foe.kvx += (1 if fx["owner"].x > foe.x else -1) * 2600 * dt
+                if fx["t"] <= 0:
+                    self.fx.remove(fx)
+                continue
+            fx["t"] -= dt
             if fx["t"] > 0:
                 continue
             if k == "hand_warn":
                 foe = self.foe_of(fx["owner"])
                 if not foe.dead and foe.buffs["soul"] <= 0 and abs(foe.x - fx["x"]) < 62 and foe.y > GROUND_Y - 70:
-                    dmg = fx["dmg"] * fx["owner"].out_mult()
-                    foe.take_damage(dmg)
+                    self.register_hit(fx["owner"], foe, fx["dmg"])
                     self.parts.burst(fx["x"], GROUND_Y - 50, "#e8e4d0", 14, 220)
-                    self.parts.dmg_text(fx["x"], GROUND_Y - 150, dmg)
                     self.shake = max(self.shake, 5)
                 fx["kind"] = "hand"
                 fx["t"] = 0.5
             elif k == "ground_warn":
                 foe = self.foe_of(fx["owner"])
-                if not foe.dead and foe.buffs["soul"] <= 0 and abs(foe.x - fx["x"]) < 60:
+                if not foe.dead and foe.buffs["soul"] <= 0 and abs(foe.x - fx["x"]) < fx.get("radius", 60):
                     dodge = fx.get("dodge", "jump")
                     safe = foe.crouch if dodge == "crouch" else foe.y <= GROUND_Y - 70
                     if not safe:
-                        dmg = fx["dmg"] * fx["owner"].out_mult()
-                        foe.take_damage(dmg)
+                        self.register_hit(fx["owner"], foe, fx["dmg"], heavy=fx.get("heavy", False),
+                                          stun=fx.get("stun", 0))
                         self.parts.burst(fx["x"], GROUND_Y - 60, fx.get("color", "#ffd23f"), 18, 260)
-                        self.parts.dmg_text(fx["x"], GROUND_Y - 170, dmg)
                         self.shake = max(self.shake, 7)
                 fx["kind"] = "ground"
                 fx["t"] = 0.4
@@ -371,9 +527,11 @@ class Arena:
                                outline="#ff2a1a", width=3, tags=("dyn",))
             elif k == "ground_warn":
                 col = fx.get("color", "#ffd23f")
-                cv.create_line(fx["x"] + ox, 0, fx["x"] + ox, GROUND_Y, fill=col, width=2,
-                               dash=(4, 8), tags=("dyn",))
-                r = 24 + 6 * math.sin(now * 14)
+                rad = fx.get("radius", 60)
+                if fx.get("heavy"):
+                    cv.create_line(fx["x"] + ox, 0, fx["x"] + ox, GROUND_Y, fill=col, width=2,
+                                   dash=(4, 8), tags=("dyn",))
+                r = rad + 6 * math.sin(now * 14)
                 cv.create_oval(fx["x"] - r + ox, GROUND_Y - r * 0.45 + oy, fx["x"] + r + ox, GROUND_Y + r * 0.45 + oy,
                                outline=col, width=3, tags=("dyn",))
             elif k == "hand":
@@ -390,9 +548,13 @@ class Arena:
             elif k == "ground":
                 col = fx.get("color", "#ff8c1a")
                 flick = random.uniform(0.8, 1.2)
-                cv.create_rectangle(fx["x"] - 26 * flick + ox, GROUND_Y - 230 + oy, fx["x"] + 26 * flick + ox, GROUND_Y + oy,
+                hgt = 300 if fx.get("heavy") else 230
+                wid = 34 if fx.get("heavy") else 26
+                cv.create_rectangle(fx["x"] - wid * flick + ox, GROUND_Y - hgt + oy,
+                                    fx["x"] + wid * flick + ox, GROUND_Y + oy,
                                     fill=col, stipple="gray50", outline="", tags=("dyn",))
-                cv.create_rectangle(fx["x"] - 12 * flick + ox, GROUND_Y - 230 + oy, fx["x"] + 12 * flick + ox, GROUND_Y + oy,
+                cv.create_rectangle(fx["x"] - 12 * flick + ox, GROUND_Y - hgt + oy,
+                                    fx["x"] + 12 * flick + ox, GROUND_Y + oy,
                                     fill="#ffffff", stipple="gray25", outline="", tags=("dyn",))
             elif k == "shock":
                 f = fx["owner"]
@@ -403,6 +565,60 @@ class Arena:
                     pts += [x0 + f.facing * fx.get("range", 185) * tt, y0 + random.uniform(-16, 16) * (1 - tt)]
                 cv.create_line(*pts, fill="#ffd23f", width=9, tags=("dyn",), stipple="gray50")
                 cv.create_line(*pts, fill="#fff7b0", width=4, tags=("dyn",))
+            elif k == "beam":
+                f = fx["owner"]
+                x0, y0 = fx["x0"] + ox, fx["y0"] + oy
+                x1 = x0 + f.facing * fx.get("range", 520)
+                cv.create_line(x0, y0, x1, y0, fill=f.h["accent"], width=26, tags=("dyn",), stipple="gray25")
+                cv.create_line(x0, y0, x1, y0, fill=f.h["glow"], width=10, tags=("dyn",))
+                cv.create_line(x0, y0, x1, y0, fill="#ffffff", width=3, tags=("dyn",))
+            elif k == "strike":
+                f = fx["owner"]
+                x0 = fx["x0"] + ox
+                r = fx.get("range", 150) * (0.4 + 0.6 * (1 - fx["t"] / 0.25))
+                a0 = -50 if f.facing > 0 else 130
+                cv.create_arc(x0 - r, GROUND_Y - 200 + oy, x0 + r, GROUND_Y - 20 + oy,
+                              start=a0, extent=80, style="arc", outline=f.h["glow"], width=5, tags=("dyn",))
+            elif k == "poison":
+                x = fx["x"] + ox
+                p = 1 - fx["t"] / 0.4
+                r = 30 + 40 * p
+                cv.create_oval(x - r, GROUND_Y - 150 - r * 0.5 + oy, x + r, GROUND_Y - 150 + r * 0.5 + oy,
+                               outline="#7ad12a", width=3, tags=("dyn",), stipple="gray50")
+            elif k == "drain":
+                f = fx["owner"]
+                x0, y0 = f.x + ox, f.y - 95 * f.scale + oy
+                x1, y1 = fx["tx"] + ox, fx["ty"] + oy
+                for i in range(3):
+                    tt = (now * 2.5 + i / 3.0) % 1.0
+                    px, py = x0 + (x1 - x0) * (1 - tt), y0 + (y1 - y0) * (1 - tt)
+                    cv.create_oval(px - 4, py - 4, px + 4, py + 4, fill="#8aff8a", outline="", tags=("dyn",))
+                cv.create_line(x0, y0, x1, y1, fill="#8aff8a", width=2, tags=("dyn",), stipple="gray25")
+            elif k == "summon":
+                f = fx["owner"]
+                for i in range(fx.get("count", 3)):
+                    sx = f.x + math.sin(now * 5 + i * 2.1) * 70 + (i - 1) * 34 + ox
+                    sy = GROUND_Y - 12 + math.sin(now * 9 + i) * 4 + oy
+                    cv.create_oval(sx - 9, sy - 7, sx + 9, sy + 7,
+                                   fill=f.h["body"], outline=f.h["accent"], width=2, tags=("dyn",))
+                    for la in (-1, 1):
+                        cv.create_line(sx + la * 8, sy, sx + la * 15, sy + 8, fill=f.h["accent"], width=2, tags=("dyn",))
+                    cv.create_oval(sx - 4, sy - 5, sx - 1, sy - 2, fill=f.h["eye"], outline="", tags=("dyn",))
+                    cv.create_oval(sx + 1, sy - 5, sx + 4, sy - 2, fill=f.h["eye"], outline="", tags=("dyn",))
+            elif k == "pull":
+                f = fx["owner"]
+                x0, y0 = f.x + ox, f.y - 90 * f.scale + oy
+                for i in range(5):
+                    a = now * 9 + i * 1.257
+                    rr = 30 + 26 * i
+                    cv.create_line(x0 + math.cos(a) * rr, y0 + math.sin(a) * rr * 0.4,
+                                   x0 + math.cos(a + 1.2) * rr * 0.6, y0 + math.sin(a + 1.2) * rr * 0.24,
+                                   fill=f.h["glow"], width=2, tags=("dyn",))
+            elif k == "leap":
+                f = fx["owner"]
+                r = fx["radius"]
+                cv.create_oval(f.x - r + ox, GROUND_Y - r * 0.3 + oy, f.x + r + ox, GROUND_Y + r * 0.3 + oy,
+                               outline=f.h["accent"], width=3, tags=("dyn",), dash=(6, 6))
 
     def draw_proj(self, cv, ox, oy):
         for pr in self.proj:
@@ -453,9 +669,10 @@ class Arena:
                        fill="#ff2a1a" if self.boss else COL_ORANGE, tags=("dyn",))
         cv.create_oval(44, 74, 62, 92, fill=COL_GOLD, outline="#a1700a", width=2, tags=("dyn",))
         cv.create_text(70, 83, text=str(coins), anchor="w", fill=COL_GOLD, font=F_MID, tags=("dyn",))
-        total = 3 * 66 - 6
+        n_ab = len(self.p.h["abilities"])
+        total = (n_ab + 1) * 66 - 6
         x0 = W // 2 - total // 2
-        for i in range(3):
+        for i in range(n_ab):
             x = x0 + i * 66
             ab = self.p.h["abilities"][i]
             nm, cdmax = ab["name"], ab["cd"]
@@ -471,6 +688,18 @@ class Arena:
             cv.create_text(x + 30, H - 58, text=str(i + 1), fill=COL_GOLD if ready else "#8a4a20",
                            font=F_MID, tags=("dyn",))
             cv.create_text(x + 30, H - 27, text=nm.split()[0][:9], fill=COL_ORANGE, font=F_TINY, tags=("dyn",))
+        x = x0 + n_ab * 66
+        pcd = self.p.parry_cd
+        ready = pcd <= 0
+        col = "#ffd23f" if self.p.parry_t > 0 else (COL_GOLD if ready else "#5a1c10")
+        cv.create_rectangle(x, H - 76, x + 60, H - 16, fill=COL_DARK, outline=col, width=2, tags=("dyn",))
+        if pcd > 0:
+            frac = pcd / PARRY_CD
+            cv.create_rectangle(x, H - 76, x + 60, H - 76 + 60 * frac, fill="#000000",
+                                stipple="gray50", outline="", tags=("dyn",))
+            cv.create_text(x + 30, H - 44, text="%.1f" % pcd, fill="#e8c9a0", font=F_SMALL, tags=("dyn",))
+        cv.create_text(x + 30, H - 58, text="F", fill=COL_GOLD if ready else "#8a4a20", font=F_MID, tags=("dyn",))
+        cv.create_text(x + 30, H - 27, text="ПАРИР", fill=COL_ORANGE, font=F_TINY, tags=("dyn",))
         if self.combo_show > 0 and self.combo_count >= 2:
             cv.create_text(W / 2 + 2, 132, text="COMBO x%d" % self.combo_count, font=F_BIG, fill="#2a0503", tags=("dyn",))
             cv.create_text(W / 2, 130, text="COMBO x%d" % self.combo_count, font=F_BIG, fill=COL_GOLD, tags=("dyn",))
@@ -493,6 +722,10 @@ class Arena:
         self.draw_proj(cv, ox, oy)
         self.parts.draw(cv, ox, oy)
         self.draw_hud(cv, coins)
+        cv.create_rectangle(0, 0, W, 24, fill="#000000", stipple="gray12", outline="", tags=("dyn",))
+        cv.create_rectangle(0, H - 24, W, H, fill="#000000", stipple="gray12", outline="", tags=("dyn",))
+        cv.create_rectangle(0, 0, 28, H, fill="#000000", stipple="gray12", outline="", tags=("dyn",))
+        cv.create_rectangle(W - 28, 0, W, H, fill="#000000", stipple="gray12", outline="", tags=("dyn",))
 
         if self.p.buffs["soul"] > 0 or self.b.buffs["soul"] > 0:
             cv.create_rectangle(0, 0, W, H, fill="#1a0a2a", stipple="gray25", outline="", tags=("dyn",))
