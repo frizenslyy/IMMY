@@ -5,28 +5,40 @@ import time
 import tkinter as tk
 
 from .arena import Arena
-from .background import (MAPS, draw_fight_bg, draw_hero_icon, draw_menu_bg,
-                         draw_screen_bg, draw_torches)
+from .background import (MAPS, draw_ambient, draw_fight_bg, draw_hero_icon,
+                         draw_menu_bg, draw_screen_bg, draw_torches)
 from .config import (COL_GOLD, COL_ORANGE, COL_SAND, F_BIG, F_MID, F_SMALL,
                      F_SQUARE, F_TINY, H, TICK_MS, TITLE, W)
 from .fighter import Fighter
-from .heroes import HEROES, RARITY_LABEL
+from .heroes import HEROES, RARITY_COLOR, RARITY_LABEL, STAT_NAMES
 from .particles import Embers, Particles
 from .save import load_save, save_save
 from .sound import Music
 from .ui import Ui
 
-CYR = {"ц": "w", "ф": "a", "ы": "s", "в": "d",
-       "tse": "w", "ef": "a", "yeru": "s", "ve": "d"}
+CYR_CHAR = {"ц": "w", "ф": "a", "ы": "s", "в": "d", "а": "f"}
+CYR_NAME = {"tse": "w", "ef": "a", "yeru": "s", "ve": "d", "a": "f"}
+VK_MAP = {87: "w", 65: "a", 83: "s", 68: "d", 70: "f"}
+ARROWS = {"left": "a", "right": "d", "up": "w", "down": "s"}
 
 
 def norm_key(e):
-    k = (e.keysym or "").lower()
-    if k.startswith("cyrillic_"):
-        return CYR.get(k[9:], k)
     ch = (getattr(e, "char", "") or "").lower()
-    if ch in CYR:
-        return CYR[ch]
+    if ch in CYR_CHAR:
+        return CYR_CHAR[ch]
+    if len(ch) == 1 and ch.isalpha():
+        return ch
+    k = (e.keysym or "").lower()
+    if k in ARROWS:
+        return ARROWS[k]
+    if k.startswith("cyrillic_"):
+        k = k[9:]
+    if k in CYR_NAME:
+        return CYR_NAME[k]
+    if k in ("??", ""):
+        vk = getattr(e, "keycode", 0)
+        if vk in VK_MAP:
+            return VK_MAP[vk]
     return k
 
 
@@ -133,7 +145,9 @@ class Game(tk.Tk):
         if self.state == "fight":
             if k == "w":
                 self.events.add("jump")
-            elif k in ("1", "2", "3"):
+            elif k == "f":
+                self.events.add("parry")
+            elif k in ("1", "2", "3", "4"):
                 self.events.add(k)
         self.keys.add(k)
 
@@ -162,13 +176,13 @@ class Game(tk.Tk):
 
     def build_input(self):
         inp = {"move": 0, "jump": "jump" in self.events, "crouch": "s" in self.keys,
-               "attack": "attack" in self.events, "cast": None}
+               "attack": "attack" in self.events, "cast": None, "parry": "parry" in self.events}
         if "a" in self.keys:
             inp["move"] -= 1
         if "d" in self.keys:
             inp["move"] += 1
         for e in self.events:
-            if e in ("1", "2", "3"):
+            if e in ("1", "2", "3", "4"):
                 inp["cast"] = int(e) - 1
         self.events.clear()
         return inp
@@ -210,7 +224,7 @@ class Game(tk.Tk):
         self.ui.coins(cv, 30, H - 40, self.coins)
         cv.create_text(W - 30, H - 40, text="БОТ: УР. %d" % self.bot_level, anchor="e",
                        fill=COL_ORANGE, font=F_MID, tags=("dyn",))
-        cv.create_text(W / 2, H - 14, text="ЛКМ — атака · WASD — движение · 1/2/3 — способности · M — музыка",
+        cv.create_text(W / 2, H - 14, text="ЛКМ — атака · WASD/стрелки — движение · F — парирование · 1/2/3/4 — способности · M — музыка",
                        fill=COL_SAND, font=F_TINY, tags=("dyn",))
 
     def draw_mode(self):
@@ -235,20 +249,21 @@ class Game(tk.Tk):
             self.preview = Fighter(sel, 640, 1, scale=2.4)
             self.preview.y = 596
         cv.create_rectangle(24, 100, 400, 660, fill="#1a0908", outline="#5a1c10", width=2, tags=("dyn",))
-        cv.create_text(212, 128, text="БОЙЦЫ", fill=COL_ORANGE, font=F_MID, tags=("dyn",))
+        cv.create_text(212, 124, text="БОЙЦЫ", fill=COL_ORANGE, font=F_MID, tags=("dyn",))
         for i, key in enumerate(keys):
             col, row = i % 2, i // 2
             x0 = 40 + col * 182
-            y0 = 150 + row * 72
-            x1, y1 = x0 + 170, y0 + 64
+            y0 = 148 + row * 57
+            x1, y1 = x0 + 170, y0 + 51
             selected = key == sel
+            rcol = RARITY_COLOR.get(HEROES[key]["rarity"], "#5a1c10")
             cv.create_rectangle(x0, y0, x1, y1, fill="#2a0f0a" if selected else "#200a08",
-                                outline=COL_GOLD if selected else "#5a1c10",
+                                outline=COL_GOLD if selected else rcol,
                                 width=3 if selected else 2, tags=("dyn",))
-            draw_hero_icon(cv, key, x0 + 10, y0 + 12, 40)
-            cv.create_text(x0 + 58, y0 + 26, text=key, anchor="w", fill=COL_GOLD, font=F_SMALL, tags=("dyn",))
+            draw_hero_icon(cv, key, x0 + 10, y0 + 10, 30)
+            cv.create_text(x0 + 54, y0 + 19, text=key, anchor="w", fill=COL_GOLD, font=F_SMALL, tags=("dyn",))
             if not select_mode and key not in self.owned:
-                cv.create_text(x0 + 58, y0 + 47, text="%d МОНЕТ" % HEROES[key]["price"],
+                cv.create_text(x0 + 54, y0 + 37, text="%d МОНЕТ" % HEROES[key]["price"],
                                anchor="w", fill="#8a4a20", font=F_TINY, tags=("dyn",))
             self.buttons.append((x0, y0, x1, y1, lambda k=key: self.pick_hero(k)))
 
@@ -258,22 +273,31 @@ class Game(tk.Tk):
             self.parts.draw(cv)
 
         hero = HEROES[sel]
-        cv.create_rectangle(880, 100, 1256, 660, fill="#1a0908", outline="#5a1c10", width=2, tags=("dyn",))
-        cv.create_text(1068, 136, text=sel, fill=COL_GOLD, font=F_BIG, tags=("dyn",))
-        cv.create_text(1068, 168, text=hero["title"], fill="#ff5a1a", font=F_SMALL, tags=("dyn",))
+        cv.create_rectangle(880, 100, 1256, 668, fill="#1a0908", outline="#5a1c10", width=2, tags=("dyn",))
+        cv.create_text(1068, 132, text=sel, fill=COL_GOLD, font=F_BIG, tags=("dyn",))
+        cv.create_text(1068, 162, text=hero["title"], fill="#ff5a1a", font=F_SMALL, tags=("dyn",))
         rar = RARITY_LABEL.get(hero["rarity"], hero["rarity"].upper())
+        rcol = RARITY_COLOR.get(hero["rarity"], COL_SAND)
         price_tag = "" if hero["price"] <= 0 else " · %d МОНЕТ" % hero["price"]
-        cv.create_text(1068, 190, text=rar + price_tag, fill=COL_SAND, font=F_TINY, tags=("dyn",))
-        cv.create_text(1068, 236, text=hero["desc"], fill="#e8c9a0", font=F_TINY, width=340, tags=("dyn",))
-        cv.create_text(1068, 300, text="СПОСОБНОСТИ", fill=COL_ORANGE, font=F_SMALL, tags=("dyn",))
-        y = 330
+        cv.create_text(1068, 184, text=rar + price_tag, fill=rcol, font=F_TINY, tags=("dyn",))
+        cv.create_text(1068, 226, text=hero["desc"], fill="#e8c9a0", font=F_TINY, width=340, tags=("dyn",))
+        cv.create_text(900, 292, text="СТАТЫ", anchor="w", fill=COL_ORANGE, font=F_SMALL, tags=("dyn",))
+        for j, (skey, sname, scol) in enumerate(STAT_NAMES):
+            val = hero["stats"][skey]
+            yy = 310 + j * 20
+            cv.create_text(900, yy, text=sname, anchor="w", fill=COL_SAND, font=F_TINY, tags=("dyn",))
+            cv.create_rectangle(990, yy - 5, 1180, yy + 5, fill="#160607", outline="#5a1c10", width=1, tags=("dyn",))
+            cv.create_rectangle(990, yy - 5, 990 + val * 19, yy + 5, fill=scol, outline="", tags=("dyn",))
+            cv.create_text(1200, yy, text=str(val), anchor="e", fill=COL_GOLD, font=F_TINY, tags=("dyn",))
+        cv.create_text(900, 378, text="СПОСОБНОСТИ", anchor="w", fill=COL_ORANGE, font=F_SMALL, tags=("dyn",))
+        y = 402
         for i, ab in enumerate(hero["abilities"]):
             cv.create_text(900, y, text="[%d] %s" % (i + 1, ab["name"]), anchor="w", fill=COL_GOLD,
                            font=F_SMALL, tags=("dyn",))
             cv.create_text(1236, y, text="%dс" % ab["cd"], anchor="e", fill="#ff5a1a", font=F_SMALL, tags=("dyn",))
             cv.create_text(920, y + 22, text=ab["desc"], anchor="w", fill=COL_SAND, font=F_TINY,
                            width=310, tags=("dyn",))
-            y += 100
+            y += 62
 
         self.ui.button(cv, 24, 24, 150, 70, "НАЗАД", self.goto_menu, font=F_SMALL)
         if select_mode:
@@ -288,17 +312,18 @@ class Game(tk.Tk):
         for i, key in enumerate(keys):
             col, row = i % 4, i // 4
             x0 = 40 + col * 300
-            y0 = 140 + row * 165
-            x1, y1 = x0 + 280, y0 + 150
+            y0 = 135 + row * 140
+            x1, y1 = x0 + 280, y0 + 130
             hero = HEROES[key]
             owned = key in self.owned
             afford = self.coins >= hero["price"]
-            cv.create_rectangle(x0, y0, x1, y1, fill="#1a0908", outline="#5a1c10", width=2, tags=("dyn",))
+            rcol = RARITY_COLOR.get(hero["rarity"], "#5a1c10")
+            cv.create_rectangle(x0, y0, x1, y1, fill="#1a0908", outline=rcol, width=2, tags=("dyn",))
             draw_hero_icon(cv, key, x0 + 14, y0 + 14, 56)
             cv.create_text(x0 + 84, y0 + 34, text=hero["name"], anchor="w", fill=COL_GOLD,
                            font=F_MID, tags=("dyn",))
             rar = RARITY_LABEL.get(hero["rarity"], hero["rarity"].upper())
-            cv.create_text(x0 + 84, y0 + 58, text=rar, anchor="w", fill=COL_SAND, font=F_TINY, tags=("dyn",))
+            cv.create_text(x0 + 84, y0 + 58, text=rar, anchor="w", fill=rcol, font=F_TINY, tags=("dyn",))
             if owned:
                 cv.create_text(x0 + 14, y1 - 24, text="КУПЛЕНО", anchor="w", fill="#8aff8a",
                                font=F_SMALL, tags=("dyn",))
@@ -335,6 +360,7 @@ class Game(tk.Tk):
         elif st == "fight":
             if self.arena is not None:
                 self.arena.draw(cv, self.coins)
+                draw_ambient(cv, time.time(), self.arena.map)
                 draw_torches(cv, time.time(), self.arena.map)
                 if self.arena.phase == "end":
                     self.ui.button(cv, W / 2 - 280, 470, W / 2 - 40, 530, "РЕВАНШ", self.start_fight, font=F_SMALL)

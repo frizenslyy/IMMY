@@ -3,7 +3,8 @@
 import math
 import random
 
-from .config import (COMBO_MULT, COMBO_WINDOW, GROUND_Y, GRAVITY, W, WALL)
+from .config import (COMBO_MULT, COMBO_WINDOW, CRIT_MULT, GROUND_Y, GRAVITY,
+                     PARRY_CD, PARRY_STUN, PARRY_WINDOW, W, WALL)
 from .heroes import HEROES
 from .util import clamp
 
@@ -40,8 +41,22 @@ class Fighter:
         self.stun_t = 0.0
         self.dead = False
         self.dead_t = 0.0
-        self.cds = [0.0, 0.0, 0.0]
-        self.buffs = {"flash": 0.0, "rage": 0.0, "soul": 0.0}
+        self.cds = [0.0] * len(self.h["abilities"])
+        self.buffs = {"flash": 0.0, "rage": 0.0, "soul": 0.0,
+                      "guard": 0.0, "swift": 0.0, "vamp": 0.0}
+        self.vamp_pct = 0.0
+        st = self.h["stats"]
+        self.stat_dmg = 0.85 + st["str"] * 0.03
+        self.crit_chance = 0.04 + st["agi"] * 0.016
+        self.stat_spd = 0.80 + st["spd"] * 0.04
+        self.parry_window = PARRY_WINDOW + st["agi"] * 0.008
+        self.parry_t = 0.0
+        self.parry_cd = 0.0
+        self.parry_flash = 0.0
+        self.root_t = 0.0
+        self.poison_t = 0.0
+        self.poison_dps = 0.0
+        self.poison_tick = 0.0
         self.soul_target = None
         self.scythe_out = False
         self.speed_mult = 1.0
@@ -75,13 +90,39 @@ class Fighter:
             self.combo = 0
         self.combo_t = COMBO_WINDOW
         self.attack_t = 0.28
-        self.attack_cd = 0.42 if self.combo < 2 else 0.55
+        self.attack_cd = 0.38 if self.combo < 2 else 0.52
         self.attack_kind = "melee"
         game.melee.append([self, 0.12, self.combo])
 
+    def try_parry(self):
+        if self.dead or self.stun_t > 0 or self.root_t > 0 or self.parry_cd > 0 or self.parry_t > 0:
+            return False
+        self.parry_t = self.parry_window
+        self.parry_cd = PARRY_CD
+        return True
+
+    def roll_damage(self, base):
+        crit = random.random() < self.crit_chance
+        dmg = base * self.stat_dmg * self.out_mult()
+        if crit:
+            dmg *= CRIT_MULT
+        return dmg, crit
+
+    def eff_speed(self):
+        m = self.speed_mult * self.stat_spd
+        if self.buffs["swift"] > 0:
+            m *= 1.45
+        return m
+
     def take_damage(self, dmg, kb_dir=0.0, stun=0.0, kb_force=None):
         if self.dead or self.buffs["soul"] > 0:
-            return
+            return "miss"
+        if self.parry_t > 0:
+            self.parry_t = 0.0
+            self.parry_flash = 0.3
+            return "parry"
+        if self.buffs["guard"] > 0:
+            return "guard"
         if self.buffs["flash"] > 0:
             dmg *= self.flash_mult
         self.hp = max(0.0, self.hp - dmg)
@@ -90,6 +131,7 @@ class Fighter:
         self.kvx += kb_dir * (240.0 if kb_force is None else kb_force)
         if stun > 0:
             self.stun_t = max(self.stun_t, stun)
+        return "hit"
 
     def update(self, dt, foe, game):
         self.anim_t += dt
@@ -104,8 +146,22 @@ class Fighter:
             self.x = clamp(e.x - e.facing * 95, WALL + 30, W - WALL - 30)
             self.soul_target = None
             game.parts.burst(self.x, self.y - 80 * self.scale, self.h["accent"], 14, 200)
-        for i in range(3):
+        for i in range(len(self.cds)):
             self.cds[i] = max(0.0, self.cds[i] - dt)
+        self.parry_t = max(0.0, self.parry_t - dt)
+        self.parry_cd = max(0.0, self.parry_cd - dt)
+        self.parry_flash = max(0.0, self.parry_flash - dt)
+        self.root_t = max(0.0, self.root_t - dt)
+        if self.poison_t > 0:
+            self.poison_t = max(0.0, self.poison_t - dt)
+            self.poison_tick += self.poison_dps * dt
+            if self.poison_tick >= 2.0:
+                n = int(self.poison_tick)
+                self.poison_tick -= n
+                self.hp = max(1.0, self.hp - n)
+                game.parts.dmg_text(self.x, self.y - 150 * self.scale, n, "#7ad12a")
+            if random.random() < dt * 8:
+                game.parts.rise(self.x, self.y - 60 * self.scale, "#7ad12a")
         self.attack_cd = max(0.0, self.attack_cd - dt)
         self.attack_t = max(0.0, self.attack_t - dt)
         self.hurt_t = max(0.0, self.hurt_t - dt)
@@ -129,7 +185,11 @@ class Fighter:
                 self.vy = 0.0
                 self.on_ground = True
                 game.parts.dust(self.x, self.y)
-        self.vx += (self.vx_target - self.vx) * min(1.0, dt * 14.0)
+        if self.root_t > 0:
+            self.vx_target = 0.0
+            self.vx = 0.0
+            self.kvx *= math.exp(-12 * dt)
+        self.vx += (self.vx_target - self.vx) * min(1.0, dt * 16.0)
         self.x += (self.vx + self.kvx) * dt
         self.kvx *= math.exp(-7 * dt)
         self.x = clamp(self.x, WALL + 30, W - WALL - 30)
@@ -140,8 +200,7 @@ class Fighter:
             game.parts.rise(self.x, self.y, self.h["glow"])
 
     def melee_damage(self, stage):
-        base = random.uniform(8, 13) * COMBO_MULT[min(stage, 2)]
-        return base * self.out_mult()
+        return random.uniform(8, 13) * COMBO_MULT[min(stage, 2)]
 
     def draw_scythe(self, cv, hx, hy, ang, s, fc):
         L = 78
@@ -284,6 +343,16 @@ class Fighter:
                     cv.create_polygon(X + (sx - 4) * s, Y + (head_t + 2) * s + bob,
                                       X + (sx + 4) * s, Y + (head_t + 2) * s + bob,
                                       X + sx * s, tipy, fill=C["glow"], outline="", tags=("dyn",), **kw)
+            elif style == "spider" and not flash_hit:
+                R(-9, head_t + 6 + bob, -5, head_t + 10 + bob, C["eye"])
+                R(7, head_t + 6 + bob, 11, head_t + 10 + bob, C["eye"])
+                for dy, ln in ((-52, 26), (-70, 30), (-88, 26), (-104, 18)):
+                    for sgn in (-1, 1):
+                        my = shoulder + dy + bob
+                        cv.create_line(X + sgn * 19 * s, Y + my * s,
+                                       X + sgn * (19 + ln * 0.6) * s, Y + (my - 14) * s,
+                                       X + sgn * (19 + ln) * s, Y + (my + 26) * s,
+                                       fill=C["body2"], width=max(2, int(4 * s)), tags=("dyn",), **kw)
             elif style == "plain" and not flash_hit:
                 R(-12, head_t - 5 + bob, 12, head_t + 3 + bob, accent)
 
@@ -323,6 +392,41 @@ class Fighter:
             for i in range(7):
                 pts += [X + (i - 3) * 7 * s, hy0 + (5 if i % 2 else -5) * s]
             cv.create_line(*pts, fill="#ffd23f", width=3, tags=("dyn",))
+
+        if self.parry_t > 0:
+            cv.create_arc(X - 62 * s, Y - 152 * s, X + 62 * s, Y - 16 * s,
+                          start=-30 if fc > 0 else 120, extent=60, style="arc",
+                          outline="#ffd23f", width=4, tags=("dyn",))
+        elif self.parry_flash > 0:
+            cv.create_arc(X - 66 * s, Y - 156 * s, X + 66 * s, Y - 12 * s,
+                          start=-30 if fc > 0 else 120, extent=60, style="arc",
+                          outline="#fff2b0", width=2, tags=("dyn",))
+
+        if self.buffs["guard"] > 0:
+            cv.create_oval(X - 44 * s, Y - 168 * s, X + 44 * s, Y + 6 * s,
+                           outline=C["glow"], width=3, tags=("dyn",), stipple="gray50")
+
+        if self.root_t > 0:
+            for i in range(6):
+                a = i * math.pi / 3.0
+                cv.create_line(X, Y, X + math.cos(a) * 34 * s, Y - abs(math.sin(a)) * 12 * s,
+                               fill=C["accent"], width=2, tags=("dyn",))
+            cv.create_line(X - 40 * s, Y - 4 * s, X + 40 * s, Y - 4 * s,
+                           fill=C["accent"], width=2, tags=("dyn",))
+
+        if self.poison_t > 0 and not flash_hit:
+            for i in range(3):
+                bx = X + math.sin(t * 2.2 + i * 2.1) * 20 * s
+                by = Y - (30 + ((t * 40 + i * 55) % 120)) * s
+                r = 3.0 * s
+                cv.create_oval(bx - r, by - r, bx + r, by + r,
+                               fill="#7ad12a", outline="", tags=("dyn",), stipple="gray50")
+
+        if self.buffs["swift"] > 0:
+            for i in range(3):
+                ly = Y - (60 + i * 34) * s
+                cv.create_line(X - fc * 34 * s, ly, X - fc * (58 + i * 8) * s, ly,
+                               fill=C["glow"], width=2, tags=("dyn",), stipple="gray50")
 
         if self.combo_t > 0 and self.combo >= 2 and self.attack_t > 0:
             cv.create_text(X, Y + (head_t - 34) * s, text="COMBO x%d" % (self.combo + 1),
