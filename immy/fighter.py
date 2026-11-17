@@ -406,14 +406,26 @@ class Fighter:
             l1, l2 = -14, 12
         else:
             l1, l2 = -10, 10
+        if C["style"] == "hood" and not flash_hit:
+            cv.create_polygon(X - fc * 8 * s, Y + (shoulder - 2 + bob) * s,
+                              X - fc * 30 * s, Y + (shoulder + 30 + bob) * s,
+                              X - fc * 26 * s, Y + (hip + 26 + bob) * s,
+                              X - fc * 4 * s, Y + (hip + 18 + bob) * s,
+                              fill=C["body2"], outline="", tags=("dyn",), **kw)
         R(l1 - 6, hip, l1 + 6, hip + leg_h, body2)
         R(l2 - 6, hip, l2 + 6, hip + leg_h, body)
         R(l1 - 7, hip + leg_h - 10, l1 + 7, hip + leg_h, C["bone"])
         R(l2 - 7, hip + leg_h - 10, l2 + 7, hip + leg_h, C["bone"])
+        R(l1 - 8, hip + leg_h - 3, l1 + 8, hip + leg_h + 2, "#101010")
+        R(l2 - 8, hip + leg_h - 3, l2 + 8, hip + leg_h + 2, "#101010")
+        R(l1 - 7, hip + leg_h // 2 - 3, l1 + 7, hip + leg_h // 2 + 3, accent)
+        R(l2 - 7, hip + leg_h // 2 - 3, l2 + 7, hip + leg_h // 2 + 3, accent)
 
         R(-19, shoulder + bob, 19, hip, body)
         R(-19, hip - 8 + bob, 19, hip, accent)
         R(-19, shoulder + bob, 19, shoulder + 12 + bob, body2)
+        R(-5, shoulder + 18 + bob, 5, shoulder + 30 + bob, accent)
+        R(-4, hip - 10 + bob, 4, hip - 2 + bob, bone)
 
         ext = 0.0
         if attacking:
@@ -421,6 +433,7 @@ class Fighter:
             R(14, shoulder + 2 + bob, 14 + ext, shoulder + 15 + bob, body)
             R(-26, shoulder + 6 + bob, -15, shoulder + 44 + bob, body2)
             R(14 + ext - 8, shoulder - 1 + bob, 14 + ext + 2, shoulder + 18 + bob, C["bone"])
+            R(14 + ext - 8, shoulder + 2 + bob, 14 + ext - 5, shoulder + 8 + bob, accent)
         elif striking:
             sw_ext = 34 + 30 * math.sin(prog * math.pi)
             kind = self.attack_kind
@@ -428,9 +441,11 @@ class Fighter:
                 R(-8, hip - 8, 6, hip + 16, body2)
                 R(6, hip - 12, 6 + sw_ext, hip - 2, body)
                 R(6 + sw_ext - 8, hip - 12, 6 + sw_ext + 2, hip - 2, C["bone"])
+                R(6 + sw_ext - 8, hip - 9, 6 + sw_ext - 5, hip - 4, accent)
             elif kind == "upper":
                 R(12, shoulder - sw_ext + 6, 24, shoulder + 12, body)
                 R(12, shoulder - sw_ext, 24, shoulder - sw_ext + 10, C["bone"])
+                R(15, shoulder - sw_ext + 2, 21, shoulder - sw_ext + 5, accent)
                 R(-26, shoulder + 6, -15, shoulder + 40, body2)
             elif kind == "sweep":
                 R(-8, hip - 4, 4, hip + leg_h - 6, body2)
@@ -439,23 +454,36 @@ class Fighter:
             elif kind == "air":
                 R(10, shoulder - 4, 22, shoulder - sw_ext * 0.7, body)
                 R(10, shoulder - sw_ext * 0.7 - 8, 22, shoulder - sw_ext * 0.7, C["bone"])
+                R(13, shoulder - sw_ext * 0.7 - 6, 19, shoulder - sw_ext * 0.7 - 3, accent)
                 R(-14, hip - 4, -4, hip + leg_h + 8, body2)
             else:
                 R(8, shoulder, 20, shoulder + sw_ext, body)
                 R(8, shoulder + sw_ext - 8, 20, shoulder + sw_ext, C["bone"])
+                R(11, shoulder + sw_ext - 6, 17, shoulder + sw_ext - 3, accent)
                 R(-20, hip - 18, -8, hip + 6, body2)
         elif walking:
             sw2 = math.sin(ph) * 5
             R(15 + sw2, shoulder + 4 + bob, 26 + sw2, shoulder + 42 + bob, body)
             R(-26 - sw2, shoulder + 4 + bob, -15 - sw2, shoulder + 42 + bob, body2)
+            R(15 + sw2, shoulder + 36 + bob, 26 + sw2, shoulder + 43 + bob, bone)
+            R(-26 - sw2, shoulder + 36 + bob, -15 - sw2, shoulder + 43 + bob, bone)
         else:
             R(15, shoulder + 4 + bob, 26, shoulder + 42 + bob, body)
             R(-26, shoulder + 4 + bob, -15, shoulder + 42 + bob, body2)
+            R(15, shoulder + 36 + bob, 26, shoulder + 43 + bob, bone)
+            R(-26, shoulder + 36 + bob, -15, shoulder + 43 + bob, bone)
 
+        R(-27, shoulder - 3 + bob, -13, shoulder + 9 + bob, accent)
+        R(13, shoulder - 3 + bob, 27, shoulder + 9 + bob, accent)
         R(-14, head_t + bob, 14, head_b + bob, body)
 
         style = C["style"]
         if style == "hood":
+            for hdx in (-11, 11):
+                cv.create_polygon(X + hdx * s, Y + (head_t + 8 + bob) * s,
+                                  X + (hdx + (3 if hdx > 0 else -3)) * s, Y + (head_t + 8 + bob) * s,
+                                  X + hdx * s, Y + (head_t - 6 + bob) * s,
+                                  fill=bone, outline="", tags=("dyn",), **kw)
             R(0, head_t + 6 + bob, 12, head_b - 2 + bob, body2)
             R(3, head_t + 11 + bob, 7, head_t + 16 + bob, accent)
             R(9, head_t + 11 + bob, 12, head_t + 16 + bob, accent)
@@ -470,6 +498,11 @@ class Fighter:
                     tipy = Y + (head_t - hgt - 5 * math.sin(t * 12 + i * 2.1)) * s + bob
                     cv.create_polygon(fx0, Y + (head_t + 2) * s + bob, fx1, Y + (head_t + 2) * s + bob,
                                       X + dxo * s, tipy, fill=col, outline="", tags=("dyn",), **kw)
+                for hdx in (-12, 12):
+                    cv.create_polygon(X + hdx * s, Y + (head_t + 8 + bob) * s,
+                                      X + (hdx + (4 if hdx > 0 else -4)) * s, Y + (head_t + 8 + bob) * s,
+                                      X + hdx * s, Y + (head_t - 10 + bob) * s,
+                                      fill=C["accent"], outline="", tags=("dyn",), **kw)
             elif style == "spike" and not flash_hit:
                 for i in range(3):
                     sx = -9 + i * 9

@@ -788,21 +788,58 @@ def main():
     assert a.myth_ready(a.p, a.b)
     print("ult gauge ok")
 
+    from immy.config import (CHEST_HELL_COST, COUNTDOWN_T, MARTYR_DMG_MULT,
+                             MARTYR_HP_MULT, MARTYR_ROUNDS)
+    assert MARTYR_ROUNDS == 10 and MARTYR_HP_MULT == 10.0 and MARTYR_DMG_MULT == 10.0
     a = Arena("DEADY", "LIGHTY", 1, False, martyr=True)
-    assert a.martyr and a.b.max_hp == 600.0 and a.b.dmg_mult == 4.0
-    a.phase = "fight"
-    a.b.hp = 1.0
-    a.register_hit(a.p, a.b, 50)
-    for _ in range(130):
-        a.update(1 / 60, dict(EMPTY_INP))
-    assert a.round == 2 and a.phase == "intro", (a.round, a.phase)
+    assert a.martyr and a.b.max_hp == 1000.0 and a.b.dmg_mult == 10.0
     a.phase = "fight"
     a.b.hp = 1.0
     a.register_hit(a.p, a.b, 50)
     for _ in range(130):
         a.update(1 / 60, dict(EMPTY_INP))
     assert a.phase == "end" and a.win and a.martyr_gems == 100, (a.phase, a.win)
+    a2 = Arena("DEADY", "LIGHTY", 1, False, martyr=True)
+    a2.phase = "fight"
+    a2.b.hp = 500.0
+    a2.reset_round()
+    assert a2.b.hp == 500.0, a2.b.hp
     print("martyr ok")
+
+    ac = Arena("DEADY", "LIGHTY", 1, False, map=MAPS[0], sfx=None)
+    assert ac.phase == "intro"
+    ac.update(2.0, dict(EMPTY_INP))
+    assert ac.phase == "count", ac.phase
+    ac.update(3.5, dict(EMPTY_INP))
+    assert ac.phase == "fight" and ac.fight_flash > 0, (ac.phase, ac.fight_flash)
+    assert COUNTDOWN_T == 3.0
+    print("countdown ok")
+
+    from immy import chests as chest_mod
+    assert CHEST_HELL_COST == 150
+    random.seed(11)
+    seen = set()
+    got_devil = False
+    devils = {"IMPY", "DEMONDY", "SATANY"}
+    for _ in range(1000):
+        kind, val = chest_mod.roll_hell()
+        seen.add(kind)
+        if kind == "hero":
+            assert val in HEROES, val
+            if val in devils:
+                got_devil = True
+        elif kind == "gems":
+            assert 15 <= val <= 40
+        else:
+            assert 400 <= val <= 900
+    assert seen == {"hero", "gems", "coins"} and got_devil, seen
+    for _ in range(500):
+        kind, val = chest_mod.roll_chaos()
+        assert kind in ("hero", "coins")
+        if kind == "hero":
+            assert val in HEROES, val
+    assert chest_mod.title("hell") != chest_mod.title("chaos")
+    print("chests ok")
 
     a = Arena("CHAINY", "DEADY", 1, False)
     a.phase = "fight"
@@ -888,12 +925,15 @@ def main():
     print("arenas 30 + traps ok")
 
     from immy import dialogue as dlg_mod
-    for pool in (dlg_mod.INTRO, dlg_mod.BOSS_INTRO, dlg_mod.ROUND2, dlg_mod.BOT_WIN,
-                 dlg_mod.PLAYER_WIN, dlg_mod.TAUNT_ON_COMBO, dlg_mod.TAUNT_ON_CAST,
+    for pool in (dlg_mod.BOSS_INTRO, dlg_mod.ROUND2, dlg_mod.BOT_WIN,
+                 dlg_mod.PLAYER_WIN, dlg_mod.TAUNT_ON_CAST,
                  dlg_mod.BOSS_CAST, dlg_mod.TAUNT_ON_PARRY):
         assert pool and all(isinstance(x, str) and x for x in pool)
+    assert not hasattr(dlg_mod, "INTRO") and not hasattr(dlg_mod, "TAUNT_ON_COMBO")
     a3 = Arena("DEADY", "LIGHTY", 1, False, map=MAPS[0], sfx=None)
-    assert a3.say is not None and a3.say_t > 0
+    assert a3.say is None, a3.say
+    a3b = Arena("DEADY", "LIGHTY", 1, True, map=MAPS[0], sfx=None)
+    assert a3b.say is not None and a3b.say_t > 0
     print("dialogues ok")
 
     from immy.config import FATALITY_ANIM_T
