@@ -1,6 +1,6 @@
-"""IMMY — элементы интерфейса: кнопки, счётчик монет."""
+"""IMMY — элементы интерфейса: кнопки, счётчики монет и самоцветов."""
 
-from .config import F_BIG, F_MID
+from .config import COL_GEM, F_BIG, F_MID
 
 
 class Ui:
@@ -21,3 +21,9 @@ class Ui:
     def coins(self, cv, x, y, coins):
         cv.create_oval(x, y - 9, x + 18, y + 9, fill="#ffd23f", outline="#a1700a", width=2, tags=("dyn",))
         cv.create_text(x + 28, y, text=str(coins), anchor="w", fill="#ffd23f", font=F_MID, tags=("dyn",))
+
+    def gems(self, cv, x, y, gems):
+        r = 10
+        cv.create_polygon(x + r, y - r, x + r * 1.7, y, x + r, y + r, x + r * 0.3, y,
+                          fill=COL_GEM, outline="#1a6a3a", width=2, tags=("dyn",))
+        cv.create_text(x + r * 2.2, y, text=str(gems), anchor="w", fill=COL_GEM, font=F_MID, tags=("dyn",))

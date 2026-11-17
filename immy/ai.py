@@ -43,6 +43,9 @@ class BotAI:
     def punish(self, dist, foe, game):
         f = self.f
         frac = foe.hp / foe.max_hp if foe.max_hp else 1.0
+        if frac <= 0.25 and game.myth_ready(f, foe):
+            if game.try_myth_ult(f, foe):
+                return True
         for i, ab in enumerate(f.h["abilities"]):
             if ab["kind"] == "ult" and f.cds[i] <= 0 and frac < 0.10:
                 dx = (foe.x - f.x) * f.facing
@@ -101,7 +104,18 @@ class BotAI:
                 f.on_ground = False
         if self.want_attack:
             self.want_attack = False
-            f.start_attack(game)
+            if dist < 150 and self.level >= 2 and f.attack_cd <= 0 and f.attack_t <= 0:
+                r = random.random()
+                if r < 0.12:
+                    f.try_strike("kick", game)
+                elif r < 0.20:
+                    f.try_strike("upper", game)
+                elif f.crouch and r < 0.28:
+                    f.try_strike("sweep", game)
+                else:
+                    f.start_attack(game)
+            else:
+                f.start_attack(game)
 
     def think(self, dist, d, foe, game):
         f = self.f

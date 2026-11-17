@@ -5,10 +5,11 @@ import random
 
 from .ai import BotAI
 from .background import MAPS, draw_hero_icon
-from .config import (COMBO_KB, COL_DEEPRED, COL_DARK, COL_FRAME, COL_GOLD, COL_ORANGE, COL_RED, COL_SAND,
-                     CRIT_MULT, F_BIG, F_HUGE, F_MID, F_SMALL, F_TINY, GROUND_Y, H, MELEE_RANGE,
-                     PARRY_CD, PARRY_STUN, ULT_HP, ULT_LEFT, ULT_QUALITY, ULT_RANGE_Y, W, WALL)
-from .fighter import Fighter
+from .config import (COMBO_KB, COMBO_MULT, COL_BLOOD, COL_DEEPRED, COL_DARK, COL_FRAME, COL_GEM, COL_GOLD,
+                     COL_ORANGE, COL_RED, COL_SAND, CRIT_MULT, F_BIG, F_HUGE, F_MID, F_SMALL, F_TINY,
+                     GROUND_Y, H, INJURY_CHANCE, MELEE_RANGE, MYTH_ENERGY, MYTH_FOE_HP, PARRY_CD,
+                     PARRY_STUN, ULT_HP, ULT_LEFT, ULT_QUALITY, ULT_RANGE_Y, W, WALL)
+from .fighter import STRIKE_KINDS, Fighter
 from .heroes import HEROES
 from .particles import Particles
 from .util import clamp
@@ -47,13 +48,14 @@ class Arena:
         self.fx = []
         self.parts = Particles()
         self.melee = []
+        self.strikes = []
         self.shake = 0.0
         self.hitstop = 0.0
         self.combo_count = 0
         self.combo_show = 0.0
         self.max_combo = 0
         self.quality_finish = 0
-        self.stats = {"specials": 0, "ults": 0, "parries": 0}
+        self.stats = {"specials": 0, "ults": 0, "parries": 0, "strikes": 0, "injuries": 0, "myth_ults": 0}
         self.win = False
         self.reward = 0
         self.rewarded = False
@@ -87,11 +89,14 @@ class Arena:
             fighter.poison_t = fighter.poison_dps = fighter.poison_tick = 0.0
             fighter.special_cd = 0.0
             fighter.sp_cds = {}
+            fighter.strike_cds = {}
+            fighter.injury = None
         self.b.dmg_mult = self.b.base_dmg * (1.15 if self.round >= 2 else 1.0)
         self.b.speed_mult = self.b.base_speed * (1.10 if self.round >= 2 else 1.0)
         self.proj = []
         self.fx = []
         self.melee = []
+        self.strikes = []
         self.parts.clear()
         self.combo_count = 0
 
@@ -119,7 +124,7 @@ class Arena:
                 self.phase = "end"
                 self.phase_t = 1e9
             else:
-                self.run_reward += (100 if self.mini else 50) + self.wave * 10
+                self.run_reward += (70 if self.mini else 35) + self.wave * 6
                 hp0 = self.p.hp
                 self.wave += 1
                 self.reset_round()
@@ -131,7 +136,7 @@ class Arena:
             return
         if self.wins_p >= 2 or self.wins_b >= 2:
             self.win = self.wins_p >= 2
-            self.reward = (100 if self.boss else 50) * self.level
+            self.reward = (100 if self.boss else 30) * max(1, self.level // 2 + 1)
             self.phase = "end"
             self.phase_t = 1e9
         else:
@@ -168,17 +173,26 @@ class Arena:
         else:
             p.crouch = inp["crouch"] and p.on_ground
             p.vx_target = inp["move"] * 330 * p.eff_speed() * (0.45 if p.crouch else 1.0)
-            if inp["jump"] and p.on_ground and not p.crouch:
+            if inp["jump"] and p.on_ground and not p.crouch and p.can_jump():
                 p.vy = -960.0
                 p.on_ground = False
             if inp["attack"]:
-                p.start_attack(self)
+                if p.crouch:
+                    p.try_strike("sweep", self)
+                elif not p.on_ground:
+                    p.try_strike("air", self)
+                else:
+                    p.start_attack(self)
+            if inp.get("strike"):
+                p.try_strike(inp["strike"], self)
             if inp.get("parry"):
                 p.try_parry()
             if inp["cast"] is not None:
                 self.cast_ability(p, inp["cast"], b)
             if inp.get("special"):
                 self.cast_special(p, inp["special"], b)
+            if inp.get("myth"):
+                self.try_myth_ult(p, b)
         self.ai.update(dt, p, self)
         p.update(dt, b, self)
         b.update(dt, p, self)
@@ -194,6 +208,12 @@ class Arena:
             if m[1] <= 0:
                 self.melee.remove(m)
                 self.do_melee(m[0], m[2])
+
+        for s in self.strikes[:]:
+            s[1] -= dt
+            if s[1] <= 0:
+                self.strikes.remove(s)
+                self.do_strike(s[0], s[2], s[3])
 
         self.update_proj(dt)
         self.update_fx(dt)
@@ -215,15 +235,17 @@ class Arena:
             self.phase = "ko"
             self.phase_t = 1.8
 
-    def register_hit(self, att, foe, base, heavy=False, kb_force=None, stun=0.0, force_crit=False):
+    def register_hit(self, att, foe, base, heavy=False, kb_force=None, stun=0.0, force_crit=False,
+                     pierce_guard=False):
         if foe.dead:
             return "miss", 0.0
         if force_crit:
-            dmg = base * att.stat_dmg * att.out_mult() * CRIT_MULT
+            dmg = base * att.dmg_factor() * att.out_mult() * CRIT_MULT
             crit = True
         else:
             dmg, crit = att.roll_damage(base)
-        res = foe.take_damage(dmg, kb_dir=att.facing, stun=stun, kb_force=kb_force)
+        res = foe.take_damage(dmg, kb_dir=att.facing, stun=stun, kb_force=kb_force,
+                              pierce_guard=pierce_guard)
         if res == "parry":
             if foe is self.p:
                 self.stats["parries"] += 1
@@ -240,6 +262,8 @@ class Arena:
             return res, 0.0
         if res != "hit":
             return res, 0.0
+        self.parts.blood(foe.x, foe.y - 100 * foe.scale, 5 if crit else 3, att.facing, big=crit)
+        self.roll_injury(att, foe, heavy or crit)
         if crit:
             self.parts.burst(foe.x - foe.facing * 12, foe.y - 95 * foe.scale, "#fff2b0", 14, 260)
             self.parts.dmg_text(foe.x, foe.y - 185 * foe.scale, dmg, color="#ff5a1a", big=True)
@@ -277,13 +301,112 @@ class Arena:
         self.register_hit(att, foe, att.melee_damage(stage), heavy=stage >= 2,
                           kb_force=COMBO_KB[min(stage, 2)])
 
+    def strike_in_range(self, att, foe, rng, ytol=165):
+        dx = (foe.x - att.x) * att.facing
+        if dx < 0 or dx > rng:
+            return False
+        a_top = att.y - ytol * att.scale
+        b0, b1 = foe.bbox()[1], foe.bbox()[3]
+        return a_top <= b1 and att.y >= b0 - 50
+
+    def do_strike(self, att, kind, stage=0):
+        foe = self.foe_of(att)
+        if foe.dead or att.dead:
+            return
+        if att is self.p:
+            self.stats["strikes"] += 1
+        if kind == "kick":
+            rng = MELEE_RANGE * 1.15 * att.scale
+            if self.strike_in_range(att, foe, rng):
+                self.register_hit(att, foe, random.uniform(10, 15) * COMBO_MULT[min(stage, 2)],
+                                  kb_force=560, pierce_guard=True)
+                self.parts.ring(foe.x, foe.y - 90 * foe.scale, att.h["accent"], 8, 44, 0.25)
+        elif kind == "upper":
+            rng = MELEE_RANGE * 0.9 * att.scale
+            if self.strike_in_range(att, foe, rng):
+                res, dmg = self.register_hit(att, foe, random.uniform(14, 20) * COMBO_MULT[min(stage, 2)],
+                                             kb_force=200, force_crit=True, pierce_guard=True)
+                if res == "hit":
+                    foe.vy = -760.0
+                    foe.on_ground = False
+                self.parts.ring(foe.x, foe.y - 120 * foe.scale, "#ffd23f", 8, 60, 0.3)
+                self.shake = max(self.shake, 8)
+        elif kind == "sweep":
+            rng = MELEE_RANGE * 1.05 * att.scale
+            if self.strike_in_range(att, foe, rng, ytol=90):
+                res, dmg = self.register_hit(att, foe, random.uniform(8, 12) * COMBO_MULT[min(stage, 2)],
+                                             kb_force=140)
+                if res == "hit":
+                    foe.root_t = max(foe.root_t, 0.6)
+                    self.parts.dmg_text(foe.x, foe.y - 200 * foe.scale, 0, txt="ПОДСЕЧКА",
+                                        color=att.h["accent"])
+        elif kind == "air":
+            if self.strike_in_range(att, foe, 130 * att.scale, ytol=260):
+                self.register_hit(att, foe, random.uniform(9, 14) * COMBO_MULT[min(stage, 2)],
+                                  kb_force=380)
+        else:
+            if self.strike_in_range(att, foe, 170 * att.scale, ytol=260):
+                self.register_hit(att, foe, random.uniform(11, 16) * COMBO_MULT[min(stage, 2)],
+                                  heavy=True, kb_force=420)
+                self.shake = max(self.shake, 9)
+
+    def roll_injury(self, att, foe, big):
+        if foe.injury is not None or foe.dead:
+            return
+        chance = INJURY_CHANCE * (1.6 if big else 1.0)
+        if random.random() >= chance:
+            return
+        kind = random.choice(("str", "spd", "jump", "ability"))
+        ab_idx = random.randrange(len(foe.h["abilities"])) if kind == "ability" else None
+        foe.injury = {"kind": kind, "ability": ab_idx}
+        if foe is self.p:
+            self.stats["injuries"] += 1
+        txt = {"str": "ТРАВМА: РУКА", "spd": "ТРАВМА: НОГА",
+               "jump": "ТРАВМА: КОЛЕНО", "ability": "ТРАВМА: СПОСОБНОСТЬ"}[kind]
+        self.parts.dmg_text(foe.x, foe.y - 220 * foe.scale, 0, txt=txt, color=COL_BLOOD, big=True)
+        self.parts.blood(foe.x, foe.y - 100 * foe.scale, 8, att.facing, big=True)
+        self.shake = max(self.shake, 8)
+
+    def myth_ready(self, f, foe):
+        abilities = f.h["abilities"]
+        if len(abilities) < 4 or abilities[3]["kind"] != "myth_ult":
+            return False
+        return (f.cds[0] <= 0 and f.cds[3] <= 0 and f.energy >= MYTH_ENERGY
+                and not foe.dead and foe.buffs["soul"] <= 0
+                and foe.hp / foe.max_hp <= MYTH_FOE_HP)
+
+    def try_myth_ult(self, f, foe):
+        if f.dead or f.stun_t > 0 or self.phase != "fight":
+            return False
+        if not self.myth_ready(f, foe):
+            return False
+        abilities = f.h["abilities"]
+        ab = abilities[3]
+        f.cds[0] = abilities[0]["cd"]
+        f.cds[3] = ab["cd"]
+        f.energy -= MYTH_ENERGY
+        self.fx.append({"kind": "myth_" + f.key.lower(), "owner": f, "foe": foe,
+                        "t": 2.2, "hit_t": 1.4, "applied": False, "dmg": ab.get("dmg", 65),
+                        "x": foe.x, "y": foe.y - 90 * foe.scale})
+        if f is self.p:
+            self.stats["myth_ults"] += 1
+        self.shake = max(self.shake, 10)
+        self.parts.ring(f.x, f.y - 90 * f.scale, "#ff2a8a", 16, 130, 0.5)
+        self.parts.burst(f.x, f.y - 90 * f.scale, "#ff2a8a", 20, 300)
+        return True
+
     def cast_ability(self, f, idx, foe):
         if f.dead or f.stun_t > 0 or self.phase != "fight":
             return False
         abilities = f.h["abilities"]
         if idx < 0 or idx >= len(abilities) or f.cds[idx] > 0:
             return False
+        if f.injury and f.injury["kind"] == "ability" and f.injury["ability"] == idx:
+            self.parts.dmg_text(f.x, f.y - 220 * f.scale, 0, txt="ТРАВМА", color=COL_BLOOD)
+            return False
         ab = abilities[idx]
+        if ab["kind"] == "myth_ult":
+            return False
         if ab["kind"] == "scythe" and f.scythe_out:
             return False
         if not self.exec_kind(f, ab, foe):
@@ -656,6 +779,27 @@ class Arena:
                 if fx["t"] <= 0 or foe.dead:
                     self.fx.remove(fx)
                 continue
+            if k.startswith("myth_"):
+                fx["t"] -= dt
+                fx["hit_t"] -= dt
+                foe = fx["foe"]
+                fx["x"] = foe.x
+                fx["y"] = foe.y - 90 * foe.scale
+                if fx["hit_t"] <= 0 and not fx["applied"]:
+                    fx["applied"] = True
+                    if not foe.dead and foe.buffs["soul"] <= 0:
+                        dmg, crit = fx["owner"].roll_damage(fx["dmg"])
+                        foe.take_damage(dmg, kb_dir=fx["owner"].facing, stun=1.5,
+                                        kb_force=460, pierce_guard=True)
+                        foe.root_t = max(foe.root_t, 1.5)
+                        self.parts.burst(foe.x, foe.y - 90 * foe.scale, fx["owner"].h["glow"], 30, 380)
+                        self.parts.blood(foe.x, foe.y - 100 * foe.scale, 10, fx["owner"].facing, big=True)
+                        self.parts.dmg_text(foe.x, foe.y - 205 * foe.scale, dmg, color="#ff2a8a", big=True)
+                        self.shake = max(self.shake, 14)
+                        self.hitstop = max(self.hitstop, 0.18)
+                if fx["t"] <= 0:
+                    self.fx.remove(fx)
+                continue
             if k.startswith("ult_"):
                 fx["t"] -= dt
                 fx["hit_t"] -= dt
@@ -873,6 +1017,46 @@ class Arena:
                                    fill=col, width=3, tags=("dyn",))
                 cv.create_oval(x - 14, y - 8, x + 14, y + 8, fill=col, stipple="gray50",
                                outline="", tags=("dyn",))
+            elif k.startswith("myth_"):
+                f = fx["owner"]
+                x, y = fx["x"] + ox, fx["y"] + oy
+                p = 1 - fx["t"] / 2.2
+                if k == "myth_necromancery":
+                    for i in range(12):
+                        a = now * 9 + i * 0.524
+                        rr = 40 + 16 * i * (0.4 + 0.6 * p)
+                        cv.create_line(x + math.cos(a) * rr, y + math.sin(a) * rr * 0.55,
+                                       x + math.cos(a + 0.9) * rr * 0.7, y + math.sin(a + 0.9) * rr * 0.4,
+                                       fill="#8aff8a" if i % 2 else "#4ad16a", width=3, tags=("dyn",))
+                    cv.create_oval(x - 46, y - 26, x + 46, y + 26, outline="#baff4a", width=3, tags=("dyn",))
+                elif k == "myth_chaosy":
+                    for i in range(9):
+                        a = now * 13 + i * 0.698
+                        rr = 30 + 20 * (i % 4) + 60 * p
+                        cv.create_line(x + math.cos(a) * rr, y - rr * 0.8,
+                                       x - math.cos(a) * rr * 0.6, y + rr * 0.5,
+                                       fill="#e04aff" if i % 2 else "#ff8adf", width=4, tags=("dyn",))
+                    cv.create_oval(x - 38, y - 38, x + 38, y + 38, outline="#ff9aff", width=3, tags=("dyn",))
+                elif k == "myth_titany":
+                    hgt = 320 * min(1.0, p * 3)
+                    cv.create_rectangle(x - 44 + ox, GROUND_Y - hgt + oy, x + 44 + ox, GROUND_Y + oy,
+                                        fill="#ffd23f", stipple="gray50", outline="", tags=("dyn",))
+                    cv.create_rectangle(x - 18 + ox, GROUND_Y - hgt + oy, x + 18 + ox, GROUND_Y + oy,
+                                        fill="#ffffff", stipple="gray25", outline="", tags=("dyn",))
+                    cv.create_oval(x - 60, y - 30, x + 60, y + 30, outline="#ffcf6a", width=4, tags=("dyn",))
+                elif k == "myth_devily":
+                    for i in range(10):
+                        a = now * 11 + i * 0.628
+                        rr = 34 + 12 * i * (0.4 + 0.6 * p)
+                        cv.create_polygon(x + math.cos(a) * rr, y + math.sin(a) * rr * 0.6 - 20,
+                                          x + math.cos(a + 0.5) * rr * 0.6, y + math.sin(a + 0.5) * rr * 0.4,
+                                          x + math.cos(a + 1.0) * rr * 0.5, y + math.sin(a + 1.0) * rr * 0.7,
+                                          fill="#ff2a1a" if i % 2 else "#ff8c1a", outline="", tags=("dyn",))
+                    cv.create_oval(x - 44, y - 30, x + 44, y + 30, outline="#ffd23f", width=3, tags=("dyn",))
+                else:
+                    r = 60 + 40 * math.sin(now * 10)
+                    cv.create_oval(x - r, y - r * 0.7, x + r, y + r * 0.7,
+                                   outline=f.h["glow"], width=4, tags=("dyn",))
             elif k.startswith("ult_"):
                 f, foe = fx["owner"], fx["foe"]
                 x, y = foe.x + ox, foe.y - 90 * foe.scale + oy
@@ -946,14 +1130,23 @@ class Arena:
             label = f.h["name"] + ("  [БОТ]" if f.is_bot else "")
             cv.create_text(x + w - 44, 16, text=label, anchor="e", fill=COL_GOLD, font=F_SMALL, tags=("dyn",))
 
+    INJURY_TXT = {"str": "ТРАВМА РУКИ: СИЛА -25%", "spd": "ТРАВМА НОГИ: СКОРОСТЬ -30%",
+                  "jump": "ТРАВМА КОЛЕНА: ПРЫЖКИ НЕДОСТУПНЫ", "ability": "ТРАВМА: СПОСОБНОСТЬ ЗАБЛОКИРОВАНА"}
+
     def draw_hud(self, cv, coins):
-        self.hp_bar(cv, 100, 380, self.p, True)
-        self.hp_bar(cv, W - 480, 380, self.b, False)
+        self.hp_bar(cv, 100, 460, self.p, True)
+        self.hp_bar(cv, W - 560, 460, self.b, False)
+        if self.p.injury:
+            cv.create_text(104, 100, text=self.INJURY_TXT[self.p.injury["kind"]], anchor="w",
+                           font=F_TINY, fill=COL_BLOOD, tags=("dyn",))
+        if self.b.injury:
+            cv.create_text(W - 104, 100, text=self.INJURY_TXT[self.b.injury["kind"]], anchor="e",
+                           font=F_TINY, fill=COL_BLOOD, tags=("dyn",))
         efrac = clamp(self.p.energy / 100.0, 0.0, 1.0)
-        cv.create_rectangle(141, 70, 483, 84, fill="#160404", outline="#5a1c10", width=2, tags=("dyn",))
+        cv.create_rectangle(103, 70, 557, 84, fill="#160404", outline="#5a1c10", width=2, tags=("dyn",))
         if efrac > 0:
-            cv.create_rectangle(144, 73, 144 + int(336 * efrac), 81, fill=COL_GOLD, outline="", tags=("dyn",))
-        cv.create_text(480, 77, text="ЭНЕРГИЯ", anchor="e", font=F_TINY,
+            cv.create_rectangle(106, 73, 106 + int(448 * efrac), 81, fill=COL_GOLD, outline="", tags=("dyn",))
+        cv.create_text(554, 77, text="ЭНЕРГИЯ", anchor="e", font=F_TINY,
                        fill="#5a1c10" if efrac > 0.85 else "#a1700a", tags=("dyn",))
         for i in range(0 if self.survival else 2):
             for side, wins in ((-1, self.wins_p), (1, self.wins_b)):
@@ -971,7 +1164,7 @@ class Arena:
         cv.create_oval(44, 74, 62, 92, fill=COL_GOLD, outline="#a1700a", width=2, tags=("dyn",))
         cv.create_text(70, 83, text=str(coins), anchor="w", fill=COL_GOLD, font=F_MID, tags=("dyn",))
         n_ab = len(self.p.h["abilities"])
-        total = (n_ab + 1) * 66 - 6
+        total = (n_ab + 3) * 66 - 6
         x0 = W // 2 - total // 2
         for i in range(n_ab):
             x = x0 + i * 66
@@ -979,30 +1172,48 @@ class Arena:
             nm, cdmax = ab["name"], ab["cd"]
             frac = self.p.cds[i] / cdmax if cdmax else 0.0
             ready = self.p.cds[i] <= 0
-            cv.create_rectangle(x, H - 76, x + 60, H - 16, fill=COL_DARK,
-                                outline=COL_GOLD if ready else "#5a1c10", width=2, tags=("dyn",))
+            blocked = self.p.injury and self.p.injury["kind"] == "ability" and self.p.injury["ability"] == i
+            cv.create_rectangle(x, H - 86, x + 60, H - 26, fill=COL_DARK,
+                                outline=COL_BLOOD if blocked else (COL_GOLD if ready else "#5a1c10"),
+                                width=2, tags=("dyn",))
             if frac > 0:
-                cv.create_rectangle(x, H - 76, x + 60, H - 76 + 60 * frac, fill="#000000",
+                cv.create_rectangle(x, H - 86, x + 60, H - 86 + 60 * frac, fill="#000000",
                                     stipple="gray50", outline="", tags=("dyn",))
-                cv.create_text(x + 30, H - 44, text="%.0f" % math.ceil(self.p.cds[i]), fill="#e8c9a0",
+                cv.create_text(x + 30, H - 54, text="%.0f" % math.ceil(self.p.cds[i]), fill="#e8c9a0",
                                font=F_SMALL, tags=("dyn",))
-            cv.create_text(x + 30, H - 58, text=str(i + 1), fill=COL_GOLD if ready else "#8a4a20",
+            cv.create_text(x + 30, H - 68, text=str(i + 1), fill=COL_GOLD if ready else "#8a4a20",
                            font=F_MID, tags=("dyn",))
-            cv.create_text(x + 30, H - 27, text=nm.split()[0][:9], fill=COL_ORANGE, font=F_TINY, tags=("dyn",))
-        x = x0 + n_ab * 66
+            cv.create_text(x + 30, H - 37, text=nm.split()[0][:9], fill=COL_ORANGE, font=F_TINY, tags=("dyn",))
+        extra = (("E", "ПИНОК", self.p.strike_cds.get("kick", 0.0), 1.0),
+                 ("S+ЛКМ", "АППЕРКОТ", self.p.strike_cds.get("upper", 0.0), 2.0))
+        for j, (key_txt, nm2, cdl, cdmax) in enumerate(extra):
+            x = x0 + (n_ab + 1 + j) * 66
+            ready = cdl <= 0
+            cv.create_rectangle(x, H - 86, x + 60, H - 26, fill=COL_DARK,
+                                outline=COL_GOLD if ready else "#5a1c10", width=2, tags=("dyn",))
+            if cdl > 0:
+                frac = cdl / cdmax
+                cv.create_rectangle(x, H - 86, x + 60, H - 86 + 60 * frac, fill="#000000",
+                                    stipple="gray50", outline="", tags=("dyn",))
+                cv.create_text(x + 30, H - 54, text="%.1f" % cdl, fill="#e8c9a0", font=F_SMALL, tags=("dyn",))
+            cv.create_text(x + 30, H - 68, text=key_txt, fill=COL_GOLD if ready else "#8a4a20",
+                           font=F_TINY, tags=("dyn",))
+            cv.create_text(x + 30, H - 37, text=nm2, fill=COL_ORANGE, font=F_TINY, tags=("dyn",))
+        x = x0 + (n_ab + 3) * 66 - 66
         pcd = self.p.parry_cd
         ready = pcd <= 0
         col = "#ffd23f" if self.p.parry_t > 0 else (COL_GOLD if ready else "#5a1c10")
-        cv.create_rectangle(x, H - 76, x + 60, H - 16, fill=COL_DARK, outline=col, width=2, tags=("dyn",))
+        cv.create_rectangle(x, H - 86, x + 60, H - 26, fill=COL_DARK, outline=col, width=2, tags=("dyn",))
         if pcd > 0:
             frac = pcd / PARRY_CD
-            cv.create_rectangle(x, H - 76, x + 60, H - 76 + 60 * frac, fill="#000000",
+            cv.create_rectangle(x, H - 86, x + 60, H - 86 + 60 * frac, fill="#000000",
                                 stipple="gray50", outline="", tags=("dyn",))
-            cv.create_text(x + 30, H - 44, text="%.1f" % pcd, fill="#e8c9a0", font=F_SMALL, tags=("dyn",))
-        cv.create_text(x + 30, H - 58, text="F", fill=COL_GOLD if ready else "#8a4a20", font=F_MID, tags=("dyn",))
-        cv.create_text(x + 30, H - 27, text="ПАРИР", fill=COL_ORANGE, font=F_TINY, tags=("dyn",))
-        for i, sp in enumerate(self.p.h.get("specials", ())):
-            x, y = 34, 150 + i * 70
+            cv.create_text(x + 30, H - 54, text="%.1f" % pcd, fill="#e8c9a0", font=F_SMALL, tags=("dyn",))
+        cv.create_text(x + 30, H - 68, text="F", fill=COL_GOLD if ready else "#8a4a20", font=F_MID, tags=("dyn"))
+        cv.create_text(x + 30, H - 37, text="ПАРИР", fill=COL_ORANGE, font=F_TINY, tags=("dyn",))
+        specials = self.p.h.get("specials", ())
+        for i, sp in enumerate(specials):
+            x, y = 34, 170 + i * 70
             cdl = self.p.sp_cds.get(sp["combo"], 0.0)
             can = self.p.energy >= sp["cost"] and self.p.special_cd <= 0 and cdl <= 0
             col = "#ffd24a" if can else "#5a1c10"
@@ -1018,6 +1229,11 @@ class Arena:
             cv.create_text(x + 31, y + 34, text=sp["name"].split()[0][:9], fill=COL_ORANGE, font=F_TINY, tags=("dyn",))
             cv.create_text(x + 31, y + 50, text=str(sp["cost"]), fill="#ffd24a" if can else "#8a4a20",
                            font=F_TINY, tags=("dyn",))
+        if self.myth_ready(self.p, self.b):
+            y = 170 + len(specials) * 70 + 8
+            cv.create_rectangle(34, y, 96, y + 62, fill="#2a0820", outline="#ff2a8a", width=3, tags=("dyn",))
+            cv.create_text(65, y + 22, text="1+4", fill="#ff2a8a", font=F_MID, tags=("dyn",))
+            cv.create_text(65, y + 44, text="МИФ", fill="#ff9aff", font=F_TINY, tags=("dyn",))
         if self.combo_show > 0 and self.combo_count >= 2:
             cv.create_text(W / 2 + 2, 132, text="COMBO x%d" % self.combo_count, font=F_BIG, fill="#2a0503", tags=("dyn",))
             cv.create_text(W / 2, 130, text="COMBO x%d" % self.combo_count, font=F_BIG, fill=COL_GOLD, tags=("dyn",))
@@ -1067,33 +1283,37 @@ class Arena:
             self.banner(cv, "НОКАУТ!", COL_RED)
         elif self.phase == "end":
             cv.create_rectangle(0, 0, W, H, fill="#0a0202", stipple="gray50", outline="", tags=("dyn",))
-            cv.create_rectangle(W / 2 - 340, 170, W / 2 + 340, 560, fill=COL_DARK, outline=COL_GOLD,
+            cv.create_rectangle(W / 2 - 400, 220, W / 2 + 400, 660, fill=COL_DARK, outline=COL_GOLD,
                                 width=3, tags=("dyn",))
             if self.survival:
-                cv.create_text(W / 2, 245, text="ВЫЖИВАНИЕ ОКОНЧЕНО", font=F_HUGE, fill=COL_GOLD, tags=("dyn",))
+                cv.create_text(W / 2, 295, text="ВЫЖИВАНИЕ ОКОНЧЕНО", font=F_HUGE, fill=COL_GOLD, tags=("dyn",))
                 if self.reward > 0:
-                    cv.create_text(W / 2, 315, text="+%d МОНЕТ" % self.reward, font=F_BIG, fill=COL_ORANGE, tags=("dyn",))
-                cv.create_text(W / 2, 360, text="Пройдено волн: %d" % (self.wave - 1),
+                    cv.create_text(W / 2, 365, text="+%d МОНЕТ" % self.reward, font=F_BIG, fill=COL_ORANGE, tags=("dyn",))
+                cv.create_text(W / 2, 410, text="Пройдено волн: %d" % (self.wave - 1),
                                font=F_SMALL, fill="#e8c9a0", tags=("dyn",))
                 if getattr(self, "exp_gain", 0):
-                    cv.create_text(W / 2, 392, text="+%d EXP" % self.exp_gain,
+                    cv.create_text(W / 2, 442, text="+%d EXP" % self.exp_gain,
                                    font=F_SMALL, fill="#8aff8a", tags=("dyn",))
+                if getattr(self, "max_combo", 0) >= 2:
+                    cv.create_text(W / 2, 470, text="Макс. комбо: %d" % self.max_combo,
+                                   font=F_SMALL, fill=COL_GEM, tags=("dyn",))
             else:
                 t1 = "ПОБЕДА!" if self.win else "ПОРАЖЕНИЕ"
-                cv.create_text(W / 2, 245, text=t1, font=F_HUGE,
+                cv.create_text(W / 2, 295, text=t1, font=F_HUGE,
                                fill=COL_GOLD if self.win else "#8a4a20", tags=("dyn",))
                 if self.win:
-                    cv.create_text(W / 2, 315, text="+%d МОНЕТ" % self.reward, font=F_BIG, fill=COL_ORANGE, tags=("dyn",))
+                    cv.create_text(W / 2, 365, text="+%d МОНЕТ" % self.reward, font=F_BIG, fill=COL_ORANGE, tags=("dyn",))
                     sub = "Уровень %d%s пройден!" % (self.level, " (БОСС ×2)" if self.boss else "")
-                    cv.create_text(W / 2, 360, text=sub, font=F_SMALL, fill="#e8c9a0", tags=("dyn",))
+                    cv.create_text(W / 2, 410, text=sub, font=F_SMALL, fill="#e8c9a0", tags=("dyn",))
                 if getattr(self, "exp_gain", 0):
-                    cv.create_text(W / 2, 390, text="+%d EXP" % self.exp_gain,
+                    cv.create_text(W / 2, 440, text="+%d EXP" % self.exp_gain,
                                    font=F_SMALL, fill="#8aff8a", tags=("dyn",))
                 if getattr(self, "finish_bonus", 0):
-                    cv.create_text(W / 2, 412, text="БОНУС ЗА ДОБИВАНИЕ +%d" % self.finish_bonus,
+                    cv.create_text(W / 2, 462, text="БОНУС ЗА ДОБИВАНИЕ +%d" % self.finish_bonus,
                                    font=F_SMALL, fill=COL_GOLD, tags=("dyn",))
                 else:
-                    cv.create_text(W / 2, 325, text="Бот уровня %d оказался сильнее." % self.level,
+                    cv.create_text(W / 2, 375, text="Бот уровня %d оказался сильнее." % self.level,
                                    font=F_SMALL, fill="#e8c9a0", tags=("dyn",))
-                cv.create_text(W / 2, 420, text="Счёт раундов  %d : %d" % (self.wins_p, self.wins_b),
-                               font=F_SMALL, fill=COL_SAND, tags=("dyn",))
+                cv.create_text(W / 2, 470, text="Счёт раундов  %d : %d   ·   Макс. комбо: %d" % (
+                    self.wins_p, self.wins_b, self.max_combo),
+                    font=F_SMALL, fill=COL_SAND, tags=("dyn",))

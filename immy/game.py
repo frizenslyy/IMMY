@@ -1,5 +1,6 @@
-"""IMMY — главный класс игры: окна, ввод, магазин, кампании, достижения, музыка."""
+"""IMMY — главный класс игры: окна, ввод, магазин, сундуки, INFO, кампании, достижения."""
 
+import math
 import random
 import time
 import tkinter as tk
@@ -8,8 +9,10 @@ from . import achievements, campaign
 from .arena import Arena
 from .background import (MAPS, draw_ambient, draw_fight_bg, draw_hero_icon,
                          draw_menu_bg, draw_screen_bg, draw_torches)
-from .config import (COL_GOLD, COL_ORANGE, COL_RED, COL_SAND, exp_to_next, F_BIG,
-                     F_MID, F_SMALL, F_SQUARE, F_TINY, H, TICK_MS, TITLE, W)
+from .config import (CHEST_COST, COL_BLOOD, COL_GEM, COL_GOLD, COL_ORANGE,
+                     COL_RED, COL_SAND, FINISHER_BONUS, F_BIG, F_HUGE, F_MID,
+                     F_SMALL, F_SQUARE, F_TINY, GROUND_Y, H, TICK_MS, TITLE,
+                     W, exp_to_next)
 from .fighter import Fighter
 from .heroes import HEROES, RARITY_COLOR, RARITY_LABEL, STAT_NAMES
 from .particles import Embers, Particles
@@ -17,10 +20,41 @@ from .save import load_save, save_save
 from .sound import Music
 from .ui import Ui
 
-CYR_CHAR = {"ц": "w", "ф": "a", "ы": "s", "в": "d", "а": "f"}
-CYR_NAME = {"tse": "w", "ef": "a", "yeru": "s", "ve": "d", "a": "f"}
-VK_MAP = {87: "w", 65: "a", 83: "s", 68: "d", 70: "f"}
+CYR_CHAR = {"ц": "w", "ф": "a", "ы": "s", "в": "d", "а": "f", "у": "e"}
+CYR_NAME = {"tse": "w", "ef": "a", "yeru": "s", "ve": "d", "a": "f", "u": "e"}
+VK_MAP = {87: "w", 65: "a", 83: "s", 68: "d", 70: "f", 69: "e"}
 ARROWS = {"left": "a", "right": "d", "up": "w", "down": "s"}
+
+INFO_STRIKES = [
+    ("КОМБО: 3 удара подряд усиливаются (x1.0 / x1.18 / x1.4), окно 0.9с", COL_ORANGE),
+    ("E — ПИНОК: дальний удар, сильный отброс и пробитие блока", COL_SAND),
+    ("S+ЛКМ — АППЕРКОТ: всегда крит, пробивает блок, подбрасывает врага", COL_SAND),
+    ("S+E — ПОДСЕЧКА: бьёт низко, враг лежит 0.6с (уклоняет от верхних атак)", COL_SAND),
+    ("ЛКМ в прыжке — УДАР С ВОЗДУХА: широкая дуга, достаёт приседающих", COL_SAND),
+    ("E в прыжке — ДАЙВ-УДАР: тяжёлый удар вниз с разгона, тряска экрана", COL_SAND),
+    ("F — ПАРИРОВАНИЕ: окно 0.2с, оглушает врага на 0.1с", COL_SAND),
+    ("Присед (S) уклоняет от небесных способностей и высоких ударов", COL_SAND),
+    ("Каждый удар имеет своё преимущество — комбинируй их в серии", COL_GEM),
+    ("Урон ударов растёт от СИЛЫ героя и падает при травме руки", COL_SAND),
+]
+
+INFO_MECH = [
+    ("ЭНЕРГИЯ копится за попадания по врагу и тратится на спецприёмы", COL_ORANGE),
+    ("УЛЬТА-добивание: у врага <10% HP — оставляет 1 удар; <5% — полное убийство (+" + str(FINISHER_BONUS) + " монет)", COL_RED),
+    ("МИФ-УЛЬТА (1+4): обе способности готовы, энергия ≥50, у врага ≤25% HP", "#ff2a8a"),
+    ("ТРАВМЫ: шанс повредить сустав/кость — сила -25%, скорость -30%, без прыжков или блок способности (до конца раунда)", COL_BLOOD),
+    ("КРОВЬ летит от каждого удара; криты брызжут сильнее", COL_BLOOD),
+    ("РЕДКОСТИ: ОБЫЧНЫЙ 500 · НЕОБЫЧНЫЙ 2000 · ЭПИЧЕСКИЙ 5000 · МИФИЧЕСКИЙ 12000", COL_SAND),
+    ("САМОЦВЕТЫ — валюта кампаний и достижений, обмениваются на сундуки", COL_GEM),
+    ("СУНДУК «СОКРОВИЩНИЦА ХАОСА»: " + str(CHEST_COST) + " самоцветов — герой или монеты", COL_GEM),
+    ("DEVILY — проклятый герой, выпадает только из сундука", "#8a0f0f"),
+    ("CAMPAIGN: 13 кампаний — награды: герои, монеты, самоцветы", COL_GOLD),
+    ("EXP растёт в каждом режиме; уровень игрока открывает кампании", COL_SAND),
+    ("БОТ умнеет с уровнем: комбо, наказание ошибок, апперкоты и миф-ульты", COL_SAND),
+    ("Каждые 10 уровней бота — БОСС: двойные монеты, огромная сила", COL_RED),
+    ("У каждого героя есть плюсы и минусы — играй от сильных сторон", COL_GOLD),
+    ("В умелых руках даже НЕОБЫЧНЫЙ герой побеждает ЭПИЧЕСКОГО", COL_GEM),
+]
 
 
 def norm_key(e):
@@ -51,8 +85,16 @@ class Game(tk.Tk):
         self.resizable(False, False)
         self.cv = tk.Canvas(self, width=W, height=H, bg="#120406", highlightthickness=0)
         self.cv.pack()
+        try:
+            self.update_idletasks()
+            sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+            if sw and sh:
+                self.geometry("+%d+%d" % (max(0, (sw - W) // 2), max(0, (sh - H) // 2)))
+        except Exception:
+            pass
         self.save = load_save()
         self.coins = self.save["coins"]
+        self.gems = self.save["gems"]
         self.bot_level = self.save["bot_level"]
         self.owned = self.save["owned"]
         self.exp = self.save["exp"]
@@ -71,6 +113,10 @@ class Game(tk.Tk):
         self.embers = Embers()
         self.music = Music()
         self.shop_msg = None
+        self.shop_tab = "heroes"
+        self.info_page = 0
+        self.chest_t = None
+        self.chest_reward = None
         self.toasts = []
         self.camp_idx = 0
         self.camp_ctx = None
@@ -99,13 +145,14 @@ class Game(tk.Tk):
         else:
             self.music.play("menu")
         if s in ("heroes", "select"):
-            self.preview = Fighter(self.hero_sel, 640, 1, scale=2.4)
-            self.preview.y = 596
+            self.preview = Fighter(self.hero_sel, W / 2, 1, scale=2.4)
+            self.preview.y = GROUND_Y - 19
         else:
             self.preview = None
 
     def persist(self):
         self.save["coins"] = self.coins
+        self.save["gems"] = self.gems
         self.save["bot_level"] = self.bot_level
         self.save["owned"] = self.owned
         self.save["exp"] = self.exp
@@ -113,13 +160,24 @@ class Game(tk.Tk):
         self.save["stats"]["plvl"] = self.plvl
         granted = achievements.check(self.save)
         for a in granted:
-            self.toasts.append(("ДОСТИЖИЕ: " + a["name"], a["reward"], time.time() + 4.0))
+            rw = ""
+            if a.get("reward"):
+                rw += "+%d МОНЕТ" % a["reward"]
+            if a.get("gems"):
+                rw += ("  " if rw else "") + "+%d САМОЦВЕТОВ" % a["gems"]
+            self.toasts.append(("ДОСТИЖЕНИЕ: " + a["name"], rw, time.time() + 4.0))
         self.coins = self.save["coins"]
+        self.gems = self.save["gems"]
         save_save(self.save)
 
     def earn(self, n):
         self.coins += n
         self.save["stats"]["coins_earned"] = self.save["stats"].get("coins_earned", 0) + n
+
+    def earn_gems(self, n):
+        self.gems += n
+        self.save["gems"] = self.gems
+        self.save["stats"]["gems_earned"] = self.save["stats"].get("gems_earned", 0) + n
 
     def add_exp(self, amount):
         if amount <= 0:
@@ -128,7 +186,7 @@ class Game(tk.Tk):
         while self.exp >= exp_to_next(self.plvl):
             self.exp -= exp_to_next(self.plvl)
             self.plvl += 1
-            self.toasts.append(("УРОВЕНЬ %d!" % self.plvl, 0, time.time() + 4.0))
+            self.toasts.append(("УРОВЕНЬ %d!" % self.plvl, "", time.time() + 4.0))
 
     def goto_menu(self):
         self.set_state("menu")
@@ -145,7 +203,13 @@ class Game(tk.Tk):
 
     def goto_shop(self):
         self.shop_msg = None
+        self.chest_t = None
+        self.chest_reward = None
         self.set_state("shop")
+
+    def goto_info(self):
+        self.info_page = 0
+        self.set_state("info")
 
     def goto_campaigns(self):
         self.set_state("campaigns")
@@ -161,8 +225,8 @@ class Game(tk.Tk):
     def pick_hero(self, key):
         self.hero_sel = key
         if self.state in ("heroes", "select"):
-            self.preview = Fighter(key, 640, 1, scale=2.4)
-            self.preview.y = 596
+            self.preview = Fighter(key, W / 2, 1, scale=2.4)
+            self.preview.y = GROUND_Y - 19
 
     def buy_hero(self, key):
         hero = HEROES[key]
@@ -176,6 +240,52 @@ class Game(tk.Tk):
         self.save["stats"]["buys"] = self.save["stats"].get("buys", 0) + 1
         self.persist()
         self.shop_msg = ("КУПЛЕНО: %s!" % hero["name"], time.time() + 2.5)
+
+    def chest_keys(self, rarity):
+        return [k for k, v in HEROES.items() if v["rarity"] == rarity]
+
+    def roll_chest(self):
+        r = random.random()
+        if r < 0.05:
+            return ("hero", "DEVILY")
+        if r < 0.15:
+            return ("hero", random.choice(self.chest_keys("mythic")))
+        if r < 0.33:
+            return ("hero", random.choice(self.chest_keys("epic")))
+        if r < 0.58:
+            return ("hero", random.choice(self.chest_keys("uncommon")))
+        return ("coins", random.randint(150, 500))
+
+    def buy_chest(self):
+        if self.gems < CHEST_COST:
+            self.shop_msg = ("НЕ ХВАТАЕТ САМОЦВЕТОВ (%d/%d)" % (self.gems, CHEST_COST),
+                             time.time() + 2.5)
+            return
+        self.gems -= CHEST_COST
+        self.save["gems"] = self.gems
+        self.save["stats"]["chests"] = self.save["stats"].get("chests", 0) + 1
+        kind, val = self.roll_chest()
+        if kind == "hero":
+            if val in self.owned:
+                comp = HEROES[val]["price"] // 2 + 10
+                self.earn(comp)
+                self.earn_gems(10)
+                self.chest_reward = ("dupe", val, comp)
+            else:
+                self.owned.append(val)
+                self.save["stats"]["buys"] = self.save["stats"].get("buys", 0) + 1
+                self.chest_reward = ("hero", val)
+        else:
+            self.earn(val)
+            self.chest_reward = ("coins", val)
+        self.persist()
+        self.chest_t = 0.0
+        self.set_state("chest_open")
+
+    def collect_chest(self):
+        self.chest_t = None
+        self.chest_reward = None
+        self.set_state("shop")
 
     def start_fight(self):
         nm = getattr(self, "next_mode", "bot")
@@ -209,6 +319,8 @@ class Game(tk.Tk):
                 self.events.add("jump")
             elif k == "f":
                 self.events.add("parry")
+            elif k == "e":
+                self.events.add("kick")
             elif k in ("1", "2", "3", "4"):
                 self.events.add(k)
         self.keys.add(k)
@@ -239,14 +351,31 @@ class Game(tk.Tk):
     def build_input(self):
         inp = {"move": 0, "jump": "jump" in self.events, "crouch": "s" in self.keys,
                "attack": "attack" in self.events, "cast": None, "parry": "parry" in self.events,
-               "special": None}
+               "special": None, "strike": None, "myth": False}
         if "a" in self.keys:
             inp["move"] -= 1
         if "d" in self.keys:
             inp["move"] += 1
-        for e in self.events:
-            if e in ("1", "2", "3", "4"):
-                inp["cast"] = int(e) - 1
+        digits = sorted(e for e in self.events if e in ("1", "2", "3", "4"))
+        if {"1", "4"} <= set(digits):
+            inp["myth"] = True
+        elif digits:
+            inp["cast"] = int(digits[-1]) - 1
+        if self.arena is not None:
+            p = self.arena.p
+            if inp["attack"] and "s" in self.keys:
+                inp["attack"] = False
+                inp["strike"] = "upper"
+            elif inp["attack"] and not p.on_ground:
+                inp["attack"] = False
+                inp["strike"] = "air"
+            if "kick" in self.events:
+                if p.on_ground and "s" in self.keys:
+                    inp["strike"] = "sweep"
+                elif not p.on_ground:
+                    inp["strike"] = "dive"
+                else:
+                    inp["strike"] = "kick"
         combos = set()
         if {"a", "s"} <= self.keys:
             combos.add("as")
@@ -276,9 +405,21 @@ class Game(tk.Tk):
             self.preview.anim_t += dt
             if random.random() < dt * 4:
                 hero = HEROES[self.hero_sel]
-                self.parts.items.append({"x": 640 + random.uniform(-50, 50), "y": 596 - random.uniform(20, 170),
+                self.parts.items.append({"x": W / 2 + random.uniform(-50, 50),
+                                         "y": GROUND_Y - 19 - random.uniform(20, 170),
                                          "vx": random.uniform(-20, 20), "vy": random.uniform(-70, -25),
                                          "t": 0.6, "life": 0.6, "color": hero["glow"], "r": 2.5, "g": -40})
+            self.parts.update(dt)
+        elif self.state == "chest_open" and self.chest_t is not None:
+            self.chest_t += dt
+            if 0.8 < self.chest_t < 1.7 and random.random() < dt * 30:
+                for _ in range(3):
+                    self.parts.items.append({"x": W / 2 + random.uniform(-40, 40),
+                                             "y": 430 + random.uniform(-20, 20),
+                                             "vx": random.uniform(-160, 160), "vy": random.uniform(-320, -60),
+                                             "t": 0.8, "life": 0.8,
+                                             "color": random.choice((COL_GOLD, COL_GEM, COL_ORANGE)),
+                                             "r": 3.0, "g": 300})
             self.parts.update(dt)
         if self.state == "fight" and self.arena is not None:
             inp = self.build_input()
@@ -306,13 +447,16 @@ class Game(tk.Tk):
         if a.quality_finish:
             st["finishers"] += a.quality_finish
             if a.win:
-                a.finish_bonus = 25 * a.quality_finish
+                a.finish_bonus = FINISHER_BONUS * a.quality_finish
                 a.reward += a.finish_bonus
-                exp_gain += 25 * a.quality_finish
+                exp_gain += FINISHER_BONUS * a.quality_finish
         a.exp_gain = exp_gain
         st["specials"] += a.stats["specials"]
         st["ults"] += a.stats["ults"]
         st["parries"] += a.stats["parries"]
+        st["strikes"] += a.stats["strikes"]
+        st["injuries"] += a.stats["injuries"]
+        st["myth_ults"] += a.stats["myth_ults"]
         st["max_combo"] = max(st["max_combo"], a.max_combo)
         if a.reward:
             self.earn(a.reward)
@@ -323,16 +467,24 @@ class Game(tk.Tk):
             rec = self.save["camp"].setdefault(str(idx), {"stage": 0, "done": False})
             if stage > rec["stage"]:
                 rec["stage"] = stage
-                self.earn(campaign.first_clear_reward(stage))
-                a.reward += campaign.first_clear_reward(stage)
-                st["camp_stages"] += 1
-                exp_gain += 50 + 6 * stage
-                if campaign.is_final(idx, stage) and not rec["done"]:
-                    rec["done"] = True
-                    hero = campaign.CAMPAIGNS[idx]["hero"]
+                r = campaign.CAMPAIGNS[idx]["reward"]
+                if r["type"] == "hero":
+                    hero = r["hero"]
                     if hero not in self.owned:
                         self.owned.append(hero)
-                    self.toasts.append(("ЭКСКЛЮЗИВ: %s!" % hero, 0, time.time() + 5.0))
+                    st["buys"] = st.get("buys", 0) + 1
+                    self.toasts.append(("ЭКСКЛЮЗИВ: %s!" % hero, "", time.time() + 5.0))
+                elif r["type"] == "gems":
+                    gm = campaign.first_clear_gems(stage)
+                    self.earn_gems(gm)
+                    self.toasts.append(("НАГРАДА: +%d САМОЦВЕТОВ" % gm, "", time.time() + 5.0))
+                bonus = campaign.first_clear_coins(stage)
+                self.earn(bonus)
+                a.reward += bonus
+                st["camp_stages"] += 1
+                if campaign.is_final(idx, stage) and not rec["done"]:
+                    rec["done"] = True
+                    self.toasts.append(("КАМПАНИЯ ЗАВЕРШЕНА!", "", time.time() + 5.0))
             else:
                 bonus = campaign.replay_reward(stage)
                 self.earn(bonus)
@@ -361,76 +513,86 @@ class Game(tk.Tk):
         self.toasts = [t for t in self.toasts if now < t[2]]
         for i, (name, reward, _) in enumerate(self.toasts[:3]):
             y = 96 + i * 30
-            txt = name + ("  +%d МОНЕТ" % reward if reward else "")
+            txt = name
+            if isinstance(reward, str) and reward:
+                txt += "  " + reward
+            elif isinstance(reward, int) and reward:
+                txt += "  +%d МОНЕТ" % reward
             cv.create_text(W / 2 + 2, y + 2, text=txt, font=F_SMALL, fill="#2a0503", tags=("dyn",))
             cv.create_text(W / 2, y, text=txt, font=F_SMALL, fill=COL_GOLD, tags=("dyn",))
 
     def draw_menu(self):
         cv = self.cv
         cx = W // 2
-        self.ui.button(cv, cx - 100, 260, cx + 100, 440, "PLAY", self.goto_mode, font=F_SQUARE)
-        self.ui.button(cv, cx - 160, 470, cx + 160, 526, "HEROES", self.goto_heroes, font=F_MID)
-        self.ui.button(cv, cx - 160, 536, cx + 160, 592, "КАМПАНИИ", self.goto_campaigns, font=F_MID)
-        self.ui.button(cv, cx - 160, 602, cx + 160, 658, "SHOP", self.goto_shop, font=F_MID)
-        self.ui.button(cv, cx - 160, 668, cx + 160, 706, "НАГРАДЫ", self.goto_achievements, font=F_SMALL)
+        self.ui.button(cv, cx - 110, 300, cx + 110, 500, "PLAY", self.goto_mode, font=F_SQUARE)
+        self.ui.button(cv, cx - 160, 540, cx + 160, 600, "HEROES", self.goto_heroes, font=F_MID)
+        self.ui.button(cv, cx - 160, 610, cx + 160, 670, "CAMPAIGN", self.goto_campaigns, font=F_MID)
+        self.ui.button(cv, cx - 160, 680, cx + 160, 740, "SHOP", self.goto_shop, font=F_MID)
+        self.ui.button(cv, cx - 160, 750, cx + 160, 800, "INFO", self.goto_info, font=F_SMALL)
+        self.ui.button(cv, cx - 160, 810, cx + 160, 860, "AWARDS", self.goto_achievements, font=F_SMALL)
         self.ui.coins(cv, 30, H - 40, self.coins)
+        self.ui.gems(cv, 240, H - 40, self.gems)
         self.draw_level_bar(cv, 30, 24)
         cv.create_text(W - 30, H - 40, text="БОТ: УР. %d" % self.bot_level, anchor="e",
                        fill=COL_ORANGE, font=F_MID, tags=("dyn",))
-        cv.create_text(W / 2, H - 14, text="ЛКМ — атака · WASD — движение · F — парирование · 1/2/3/4 — способности · A+S/W+S — спецприёмы",
+        cv.create_text(W / 2, H - 14, text="ЛКМ — атака · WASD — движение · E — пинок · S+ЛКМ — апперкот · F — парирование · 1-4 — способности · 1+4 — миф-ульта · A+S/W+S — спецприёмы",
                        fill=COL_SAND, font=F_TINY, tags=("dyn",))
 
     def draw_mode(self):
         cv = self.cv
-        cv.create_text(W / 2 + 3, 133, text="ВЫБОР РЕЖИМА", font=F_BIG, fill="#2a0503", tags=("dyn",))
-        cv.create_text(W / 2, 130, text="ВЫБОР РЕЖИМА", font=F_BIG, fill=COL_GOLD, tags=("dyn",))
-        self.ui.button(cv, W / 2 - 160, 200, W / 2 + 160, 300, "VS БОТ", self.goto_select, font=F_SQUARE)
-        self.ui.button(cv, W / 2 - 160, 320, W / 2 + 160, 400, "ВЫЖИВАНИЕ",
+        cv.create_text(W / 2 + 3, 153, text="ВЫБОР РЕЖИМА", font=F_BIG, fill="#2a0503", tags=("dyn",))
+        cv.create_text(W / 2, 150, text="ВЫБОР РЕЖИМА", font=F_BIG, fill=COL_GOLD, tags=("dyn",))
+        self.ui.button(cv, W / 2 - 160, 240, W / 2 + 160, 340, "VS БОТ", self.goto_select, font=F_SQUARE)
+        self.ui.button(cv, W / 2 - 160, 360, W / 2 + 160, 440, "ВЫЖИВАНИЕ",
                        lambda: self.goto_select("survival"), font=F_MID)
-        self.ui.button(cv, W / 2 - 160, 420, W / 2 + 160, 500, "КАМПАНИИ",
+        self.ui.button(cv, W / 2 - 160, 460, W / 2 + 160, 540, "CAMPAIGN",
                        self.goto_campaigns, font=F_MID)
-        cv.create_text(W / 2, 540, text="БОТ: УРОВЕНЬ %d" % self.bot_level, fill=COL_ORANGE,
+        cv.create_text(W / 2, 590, text="БОТ: УРОВЕНЬ %d" % self.bot_level, fill=COL_ORANGE,
                        font=F_MID, tags=("dyn",))
         if self.bot_level % 10 == 0:
-            cv.create_text(W / 2, 572, text="!! ВНИМАНИЕ: ЭТО БОСС !!", fill=COL_RED, font=F_MID, tags=("dyn",))
-        cv.create_text(W / 2, 604, text="ВЫЖИВАНИЕ: волны врагов · каждая 5-я — мини-босс",
+            cv.create_text(W / 2, 622, text="!! ВНИМАНИЕ: ЭТО БОСС !!", fill=COL_RED, font=F_MID, tags=("dyn",))
+        cv.create_text(W / 2, 654, text="ВЫЖИВАНИЕ: волны врагов · каждая 5-я — мини-босс",
                        fill=COL_SAND, font=F_TINY, tags=("dyn",))
-        cv.create_text(W / 2, 626, text="+50 монет за воина · +100 за мини-босса · бонус за волну",
+        cv.create_text(W / 2, 676, text="+35 монет за воина · +70 за мини-босса · бонус за волну",
                        fill=COL_SAND, font=F_TINY, tags=("dyn",))
-        self.ui.coins(cv, W / 2 - 40, 646, self.coins)
+        self.ui.coins(cv, W / 2 - 90, 700, self.coins)
+        self.ui.gems(cv, W / 2 + 60, 700, self.gems)
         self.ui.button(cv, 24, 24, 150, 70, "НАЗАД", self.goto_menu, font=F_SMALL)
 
     def draw_campaigns(self):
         cv = self.cv
-        cv.create_text(W / 2 + 3, 93, text="КАМПАНИИ", font=F_BIG, fill="#2a0503", tags=("dyn",))
-        cv.create_text(W / 2, 90, text="КАМПАНИИ", font=F_BIG, fill=COL_GOLD, tags=("dyn",))
-        self.ui.coins(cv, W - 190, 50, self.coins)
+        cv.create_text(W / 2 + 3, 93, text="CAMPAIGN", font=F_BIG, fill="#2a0503", tags=("dyn",))
+        cv.create_text(W / 2, 90, text="CAMPAIGN", font=F_BIG, fill=COL_GOLD, tags=("dyn",))
+        self.ui.coins(cv, W - 360, 50, self.coins)
+        self.ui.gems(cv, W - 190, 50, self.gems)
         for i, c in enumerate(campaign.CAMPAIGNS):
-            y0 = 130 + i * 172
-            x0, x1, y1 = 60, W - 60, y0 + 152
+            col, row = i // 7, i % 7
+            x0 = 40 + col * 760
+            y0 = 130 + row * 104
+            x1, y1 = x0 + 720, y0 + 96
             locked = not campaign.unlocked(i, self.save)
             prog = campaign.camp_progress(self.save, i)
             done = campaign.camp_done(self.save, i)
             cv.create_rectangle(x0, y0, x1, y1, fill="#1a0908",
                                 outline=c["color"] if not locked else "#3a1410", width=3, tags=("dyn",))
-            cv.create_text(x0 + 24, y0 + 34, text=c["name"], anchor="w", font=F_BIG,
+            cv.create_text(x0 + 20, y0 + 28, text=c["name"], anchor="w", font=F_MID,
                            fill=c["color"] if not locked else "#6a3020", tags=("dyn",))
-            cv.create_text(x0 + 24, y0 + 64, text=c["desc"], anchor="w", fill=COL_SAND,
-                           font=F_SMALL, tags=("dyn",))
-            cv.create_text(x0 + 24, y0 + 92, text="НАГРАДА: ЭКСКЛЮЗИВНЫЙ БОЕЦ %s" % c["hero"],
-                           anchor="w", fill=COL_GOLD, font=F_SMALL, tags=("dyn",))
+            cv.create_text(x0 + 20, y0 + 54, text=c["desc"], anchor="w", fill=COL_SAND,
+                           font=F_TINY, tags=("dyn",))
+            cv.create_text(x0 + 20, y0 + 78, text=campaign.reward_label(c), anchor="w",
+                           fill=COL_GOLD, font=F_TINY, tags=("dyn",))
             if locked:
                 if i == 0:
                     lock_txt = "ОТКРОЕТСЯ НА УРОВНЕ %d" % campaign.UNLOCK_PLVL
                 else:
                     lock_txt = "ЗАВЕРШИТЕ ПРЕДЫДУЩУЮ КАМПАНИЮ"
-                cv.create_text(x1 - 24, y0 + 76, text=lock_txt, anchor="e", fill="#8a4a20",
-                               font=F_MID, tags=("dyn",))
+                cv.create_text(x1 - 20, y0 + 66, text=lock_txt, anchor="e", fill="#8a4a20",
+                               font=F_TINY, tags=("dyn",))
             else:
-                cv.create_text(x1 - 24, y0 + 44, text="СТУПЕНЬ %d / %d%s" % (prog, c["stages"],
+                cv.create_text(x1 - 20, y0 + 28, text="СТУПЕНЬ %d / %d%s" % (prog, c["stages"],
                                " · ПРОЙДЕНА" if done else ""), anchor="e", fill=COL_ORANGE,
-                               font=F_SMALL, tags=("dyn",))
-                self.ui.button(cv, x1 - 190, y0 + 92, x1 - 24, y0 + 132, "ВОЙТИ",
+                               font=F_TINY, tags=("dyn",))
+                self.ui.button(cv, x1 - 150, y0 + 48, x1 - 20, y0 + 84, "ВОЙТИ",
                                lambda idx=i: self.open_camp(idx), font=F_SMALL)
         self.ui.button(cv, 24, 24, 150, 70, "НАЗАД", self.goto_menu, font=F_SMALL)
 
@@ -440,15 +602,17 @@ class Game(tk.Tk):
         prog = campaign.camp_progress(self.save, self.camp_idx)
         cv.create_text(W / 2 + 3, 93, text=c["name"], font=F_BIG, fill="#2a0503", tags=("dyn",))
         cv.create_text(W / 2, 90, text=c["name"], font=F_BIG, fill=c["color"], tags=("dyn",))
-        cv.create_text(W / 2, 126, text="Ступени открываются по порядку · финальная ступень — БОСС кампании",
-                       fill=COL_SAND, font=F_SMALL, tags=("dyn",))
+        cv.create_text(W / 2, 126, text=campaign.reward_label(c), fill=COL_GOLD,
+                       font=F_SMALL, tags=("dyn",))
+        cv.create_text(W / 2, 148, text="Ступени открываются по порядку · финальная ступень — БОСС кампании",
+                       fill=COL_SAND, font=F_TINY, tags=("dyn",))
         cols = 5
-        cw, ch = 150, 96
+        cw, ch = 220, 110
         gx = W / 2 - (cols * (cw + 14) - 14) / 2
         for n in range(1, c["stages"] + 1):
             col, row = (n - 1) % cols, (n - 1) // cols
             x0 = gx + col * (cw + 14)
-            y0 = 160 + row * (ch + 14)
+            y0 = 170 + row * (ch + 14)
             x1, y1 = x0 + cw, y0 + ch
             final = campaign.is_final(self.camp_idx, n)
             open_it = n <= prog + 1
@@ -464,10 +628,10 @@ class Game(tk.Tk):
             cv.create_text(x0 + cw / 2, y0 + 50, text=label, font=F_TINY,
                            fill=COL_RED if final else COL_ORANGE, tags=("dyn",))
             if cleared:
-                cv.create_text(x0 + cw / 2, y0 + 72, text="ПРОЙДЕНО", font=F_TINY,
+                cv.create_text(x0 + cw / 2, y0 + 74, text="ПРОЙДЕНО", font=F_TINY,
                                fill="#8aff8a", tags=("dyn",))
             elif open_it:
-                cv.create_text(x0 + cw / 2, y0 + 72, text="В БОЙ", font=F_TINY,
+                cv.create_text(x0 + cw / 2, y0 + 74, text="В БОЙ", font=F_TINY,
                                fill=COL_GOLD, tags=("dyn",))
                 self.buttons.append((x0, y0, x1, y1,
                                      lambda s=n: self.goto_select(("campaign", self.camp_idx, s))))
@@ -475,40 +639,79 @@ class Game(tk.Tk):
 
     def draw_achievements(self):
         cv = self.cv
-        cv.create_text(W / 2 + 3, 93, text="ДОСТИЖЕНИЯ", font=F_BIG, fill="#2a0503", tags=("dyn",))
-        cv.create_text(W / 2, 90, text="ДОСТИЖЕНИЯ", font=F_BIG, fill=COL_GOLD, tags=("dyn",))
-        self.ui.coins(cv, W - 190, 50, self.coins)
+        cv.create_text(W / 2 + 3, 93, text="AWARDS", font=F_BIG, fill="#2a0503", tags=("dyn",))
+        cv.create_text(W / 2, 90, text="AWARDS", font=F_BIG, fill=COL_GOLD, tags=("dyn",))
+        self.ui.coins(cv, W - 360, 50, self.coins)
+        self.ui.gems(cv, W - 190, 50, self.gems)
         stats = self.save["stats"]
         claimed = set(self.save["ach"])
-        per = 15
-        page = self.ach_page
+        per = 16
+        pages = (len(achievements.ACHIEVEMENTS) + per - 1) // per
+        page = max(0, min(self.ach_page, pages - 1))
         chunk = achievements.ACHIEVEMENTS[page * per:(page + 1) * per]
         for i, a in enumerate(chunk):
-            y0 = 124 + i * 34
+            y0 = 136 + i * 36
             got = a["id"] in claimed
             cur = min(stats.get(a["stat"], 0), a["goal"])
-            cv.create_rectangle(60, y0, W - 60, y0 + 30, fill="#1a0908" if got else "#160607",
+            cv.create_rectangle(60, y0, W - 60, y0 + 32, fill="#1a0908" if got else "#160607",
                                 outline=COL_GOLD if got else "#3a1410", width=1, tags=("dyn",))
-            cv.create_text(76, y0 + 15, text=a["name"], anchor="w", font=F_SMALL,
+            cv.create_text(76, y0 + 16, text=a["name"], anchor="w", font=F_SMALL,
                            fill=COL_GOLD if got else "#8a4a20", tags=("dyn",))
-            cv.create_text(320, y0 + 15, text=a["desc"], anchor="w", font=F_TINY,
+            cv.create_text(340, y0 + 16, text=a["desc"], anchor="w", font=F_TINY,
                            fill=COL_SAND if got else "#7a4030", tags=("dyn",))
-            cv.create_text(W - 220, y0 + 15, text="%d / %d" % (cur, a["goal"]), anchor="e",
+            cv.create_text(W - 260, y0 + 16, text="%d / %d" % (cur, a["goal"]), anchor="e",
                            font=F_TINY, fill="#8aff8a" if got else COL_SAND, tags=("dyn",))
-            cv.create_text(W - 76, y0 + 15, text="+%d" % a["reward"], anchor="e", font=F_SMALL,
+            if a.get("gems"):
+                r = 6
+                gx = W - 172
+                cv.create_polygon(gx + r, y0 + 16 - r, gx + r * 1.7, y0 + 16, gx + r, y0 + 16 + r,
+                                  gx + r * 0.3, y0 + 16, fill=COL_GEM, outline="#1a6a3a",
+                                  width=1, tags=("dyn",))
+                cv.create_text(W - 140, y0 + 16, text="+%d" % a["gems"], anchor="e",
+                               font=F_TINY, fill=COL_GEM, tags=("dyn",))
+            cv.create_text(W - 76, y0 + 16, text="+%d" % a["reward"], anchor="e", font=F_SMALL,
                            fill=COL_GOLD if got else "#6a5010", tags=("dyn",))
-        cv.create_text(W / 2, 648, text="СТРАНИЦА %d / %d" % (page + 1, 3), font=F_SMALL,
+        cv.create_text(W / 2, 780, text="СТРАНИЦА %d / %d" % (page + 1, pages), font=F_SMALL,
                        fill=COL_SAND, tags=("dyn",))
         if page > 0:
-            self.ui.button(cv, W / 2 - 220, 630, W / 2 - 120, 666, "<",
+            self.ui.button(cv, W / 2 - 260, 760, W / 2 - 160, 800, "<",
                            lambda: self._ach_page(-1), font=F_SMALL)
-        if page < 2:
-            self.ui.button(cv, W / 2 + 120, 630, W / 2 + 220, 666, ">",
+        if page < pages - 1:
+            self.ui.button(cv, W / 2 + 160, 760, W / 2 + 260, 800, ">",
                            lambda: self._ach_page(1), font=F_SMALL)
         self.ui.button(cv, 24, 24, 150, 70, "НАЗАД", self.goto_menu, font=F_SMALL)
 
     def _ach_page(self, d):
-        self.ach_page = max(0, min(2, self.ach_page + d))
+        pages = (len(achievements.ACHIEVEMENTS) + 15) // 16
+        self.ach_page = max(0, min(pages - 1, self.ach_page + d))
+
+    def draw_info(self):
+        cv = self.cv
+        cv.create_text(W / 2 + 3, 93, text="INFO", font=F_BIG, fill="#2a0503", tags=("dyn",))
+        cv.create_text(W / 2, 90, text="INFO", font=F_BIG, fill=COL_GOLD, tags=("dyn",))
+        if self.info_page == 0:
+            cv.create_text(W / 2, 136, text="УДАРЫ И КОМБО", font=F_MID, fill=COL_ORANGE, tags=("dyn",))
+            lines = INFO_STRIKES
+            step = 40
+        else:
+            cv.create_text(W / 2, 136, text="МЕХАНИКИ ИГРЫ", font=F_MID, fill=COL_ORANGE, tags=("dyn",))
+            lines = INFO_MECH
+            step = 42
+        for i, (txt, colr) in enumerate(lines):
+            cv.create_text(80, 180 + i * step, text=txt, anchor="w", font=F_SMALL,
+                           fill=colr, tags=("dyn",))
+        cv.create_text(W / 2, 812, text="Знание механик — половина победы. Тренируйся в режиме VS БОТ.",
+                       fill=COL_GEM, font=F_TINY, tags=("dyn",))
+        if self.info_page == 0:
+            self.ui.button(cv, W / 2 + 180, 820, W / 2 + 300, 860, "МЕХАНИКИ >",
+                           lambda: self._info_page(1), font=F_SMALL)
+        else:
+            self.ui.button(cv, W / 2 - 300, 820, W / 2 - 180, 860, "< УДАРЫ",
+                           lambda: self._info_page(-1), font=F_SMALL)
+        self.ui.button(cv, 24, 24, 150, 70, "НАЗАД", self.goto_menu, font=F_SMALL)
+
+    def _info_page(self, d):
+        self.info_page = max(0, min(1, self.info_page + d))
 
     def draw_heroes(self, select_mode):
         cv = self.cv
@@ -517,96 +720,139 @@ class Game(tk.Tk):
         if sel not in keys and keys:
             sel = keys[0]
             self.hero_sel = sel
-            self.preview = Fighter(sel, 640, 1, scale=2.4)
-            self.preview.y = 596
-        cv.create_rectangle(24, 100, 400, 660, fill="#1a0908", outline="#5a1c10", width=2, tags=("dyn",))
-        cv.create_text(212, 122, text="БОЙЦЫ", fill=COL_ORANGE, font=F_MID, tags=("dyn",))
+            self.preview = Fighter(sel, W / 2, 1, scale=2.4)
+            self.preview.y = GROUND_Y - 19
+        cv.create_rectangle(24, 100, 460, 860, fill="#1a0908", outline="#5a1c10", width=2, tags=("dyn",))
+        cv.create_text(242, 122, text="БОЙЦЫ", fill=COL_ORANGE, font=F_MID, tags=("dyn",))
         for i, key in enumerate(keys):
-            col, row = i % 3, i // 3
-            x0 = 32 + col * 122
-            y0 = 144 + row * 49
-            x1, y1 = x0 + 116, y0 + 44
+            col, row = i % 4, i // 4
+            x0 = 32 + col * 108
+            y0 = 150 + row * 46
+            x1, y1 = x0 + 100, y0 + 40
             selected = key == sel
             rcol = RARITY_COLOR.get(HEROES[key]["rarity"], "#5a1c10")
             cv.create_rectangle(x0, y0, x1, y1, fill="#2a0f0a" if selected else "#200a08",
                                 outline=COL_GOLD if selected else rcol,
                                 width=3 if selected else 2, tags=("dyn",))
-            draw_hero_icon(cv, key, x0 + 7, y0 + 7, 30)
-            cv.create_text(x0 + 44, y0 + 14, text=key, anchor="w", fill=COL_GOLD, font=F_SMALL, tags=("dyn",))
+            draw_hero_icon(cv, key, x0 + 6, y0 + 6, 28)
+            cv.create_text(x0 + 40, y0 + 12, text=key, anchor="w", fill=COL_GOLD, font=F_TINY, tags=("dyn",))
             if not select_mode and key not in self.owned:
-                cv.create_text(x0 + 44, y0 + 32, text="%d" % HEROES[key]["price"],
+                cv.create_text(x0 + 40, y0 + 30, text="%d" % HEROES[key]["price"],
                                anchor="w", fill="#8a4a20", font=F_TINY, tags=("dyn",))
             self.buttons.append((x0, y0, x1, y1, lambda k=key: self.pick_hero(k)))
 
         if self.preview is not None:
-            cv.create_oval(500, 580, 780, 620, fill="#160607", outline="#5a1c10", width=2, tags=("dyn",))
+            cv.create_oval(W / 2 - 160, GROUND_Y - 38, W / 2 + 160, GROUND_Y + 4,
+                           fill="#160607", outline="#5a1c10", width=2, tags=("dyn",))
             self.preview.render(cv)
             self.parts.draw(cv)
 
         hero = HEROES[sel]
-        cv.create_rectangle(880, 100, 1256, 668, fill="#1a0908", outline="#5a1c10", width=2, tags=("dyn",))
-        cv.create_text(1068, 132, text=sel, fill=COL_GOLD, font=F_BIG, tags=("dyn",))
-        cv.create_text(1068, 162, text=hero["title"], fill="#ff5a1a", font=F_SMALL, tags=("dyn",))
+        cv.create_rectangle(1140, 100, 1576, 860, fill="#1a0908", outline="#5a1c10", width=2, tags=("dyn",))
+        cv.create_text(1358, 132, text=sel, fill=COL_GOLD, font=F_BIG, tags=("dyn",))
+        cv.create_text(1358, 162, text=hero["title"], fill="#ff5a1a", font=F_SMALL, tags=("dyn",))
         rar = RARITY_LABEL.get(hero["rarity"], hero["rarity"].upper())
         rcol = RARITY_COLOR.get(hero["rarity"], COL_SAND)
         price_tag = "" if hero["price"] <= 0 else " · %d МОНЕТ" % hero["price"]
-        cv.create_text(1068, 184, text=rar + price_tag, fill=rcol, font=F_TINY, tags=("dyn",))
-        cv.create_text(1068, 226, text=hero["desc"], fill="#e8c9a0", font=F_TINY, width=340, tags=("dyn",))
-        cv.create_text(900, 292, text="СТАТЫ", anchor="w", fill=COL_ORANGE, font=F_SMALL, tags=("dyn",))
+        cv.create_text(1358, 184, text=rar + price_tag, fill=rcol, font=F_TINY, tags=("dyn",))
+        cv.create_text(1358, 226, text=hero["desc"], fill="#e8c9a0", font=F_TINY, width=400, tags=("dyn",))
+        cv.create_text(1170, 292, text="СТАТЫ", anchor="w", fill=COL_ORANGE, font=F_SMALL, tags=("dyn",))
         for j, (skey, sname, scol) in enumerate(STAT_NAMES):
             val = hero["stats"][skey]
             yy = 310 + j * 20
-            cv.create_text(900, yy, text=sname, anchor="w", fill=COL_SAND, font=F_TINY, tags=("dyn",))
-            cv.create_rectangle(990, yy - 5, 1180, yy + 5, fill="#160607", outline="#5a1c10", width=1, tags=("dyn",))
-            cv.create_rectangle(990, yy - 5, 990 + val * 19, yy + 5, fill=scol, outline="", tags=("dyn",))
-            cv.create_text(1200, yy, text=str(val), anchor="e", fill=COL_GOLD, font=F_TINY, tags=("dyn",))
-        cv.create_text(900, 378, text="СПОСОБНОСТИ", anchor="w", fill=COL_ORANGE, font=F_SMALL, tags=("dyn",))
-        step = 50 if len(hero["abilities"]) > 3 else 62
-        y = 402
+            cv.create_text(1170, yy, text=sname, anchor="w", fill=COL_SAND, font=F_TINY, tags=("dyn",))
+            cv.create_rectangle(1250, yy - 5, 1490, yy + 5, fill="#160607", outline="#5a1c10", width=1, tags=("dyn",))
+            cv.create_rectangle(1250, yy - 5, 1250 + val * 24, yy + 5, fill=scol, outline="", tags=("dyn",))
+            cv.create_text(1510, yy, text=str(val), anchor="w", fill=COL_GOLD, font=F_TINY, tags=("dyn",))
+        cv.create_text(1170, 392, text="СПОСОБНОСТИ", anchor="w", fill=COL_ORANGE, font=F_SMALL, tags=("dyn",))
+        y = 412
+        step = 46 if len(hero["abilities"]) > 3 else 58
         for i, ab in enumerate(hero["abilities"]):
-            ult_tag = " · УЛЬТ" if ab["kind"] == "ult" else ""
-            cv.create_text(900, y, text="[%d] %s%s" % (i + 1, ab["name"], ult_tag), anchor="w",
-                           fill=COL_RED if ab["kind"] == "ult" else COL_GOLD, font=F_SMALL, tags=("dyn",))
-            cv.create_text(1236, y, text="%dс" % ab["cd"], anchor="e", fill="#ff5a1a", font=F_SMALL, tags=("dyn",))
-            cv.create_text(920, y + 18, text=ab["desc"], anchor="w", fill=COL_SAND, font=F_TINY,
-                           width=310, tags=("dyn",))
+            if ab["kind"] == "ult":
+                tag, tcol = " · УЛЬТ", COL_RED
+            elif ab["kind"] == "myth_ult":
+                tag, tcol = " · МИФ-УЛЬТА (1+4)", "#ff2a8a"
+            else:
+                tag, tcol = "", COL_GOLD
+            cv.create_text(1170, y, text="[%d] %s%s" % (i + 1, ab["name"], tag), anchor="w",
+                           fill=tcol, font=F_SMALL, tags=("dyn",))
+            cv.create_text(1560, y, text="%dс" % ab["cd"], anchor="e", fill="#ff5a1a", font=F_SMALL, tags=("dyn",))
+            cv.create_text(1176, y + 15, text=ab["desc"], anchor="w", fill=COL_SAND, font=F_TINY,
+                           width=374, tags=("dyn",))
             y += step
         sps = hero.get("specials", ())
         if sps:
-            cv.create_text(900, y + 2, text="СПЕЦПРИЁМЫ", anchor="w",
+            cv.create_text(1170, y + 2, text="СПЕЦПРИЁМЫ", anchor="w",
                            fill=COL_ORANGE, font=F_SMALL, tags=("dyn",))
-            cv.create_text(1236, y + 2, text="энергия · кд",
+            cv.create_text(1560, y + 2, text="энергия · кд",
                            anchor="e", fill="#8a4a20", font=F_TINY, tags=("dyn",))
             for sp in sps:
                 y += 20
-                cv.create_text(900, y, text="[%s] %s" % (sp["combo"], sp["name"]), anchor="w",
+                cv.create_text(1170, y, text="[%s] %s" % (sp["combo"], sp["name"]), anchor="w",
                                fill="#ffd24a", font=F_SMALL, tags=("dyn",))
-                cv.create_text(1236, y, text="%d · %dс" % (sp["cost"], sp.get("cd", 8)), anchor="e",
+                cv.create_text(1560, y, text="%d · %dс" % (sp["cost"], sp.get("cd", 8)), anchor="e",
                                fill="#ff5a1a", font=F_SMALL, tags=("dyn",))
-            y += 20
+        pros = hero.get("pros", ())
+        cons = hero.get("cons", ())
+        if pros or cons:
+            y += 22
+            if pros:
+                cv.create_text(1170, y, text="ПЛЮСЫ", anchor="w", fill="#8aff8a", font=F_TINY, tags=("dyn",))
+                for p in pros:
+                    y += 18
+                    cv.create_text(1180, y, text="+ " + p, anchor="w", fill="#8aff8a", font=F_TINY, tags=("dyn",))
+            if cons:
+                y += 18
+                cv.create_text(1170, y, text="МИНУСЫ", anchor="w", fill="#ff5a1a", font=F_TINY, tags=("dyn",))
+                for c in cons:
+                    y += 18
+                    cv.create_text(1180, y, text="- " + c, anchor="w", fill="#ff5a1a", font=F_TINY, tags=("dyn",))
 
         self.ui.button(cv, 24, 24, 150, 70, "НАЗАД", self.goto_menu, font=F_SMALL)
         if select_mode:
             nm = getattr(self, "next_mode", "bot")
             if nm == "survival":
-                cv.create_text(W / 2, 650, text="РЕЖИМ: ВЫЖИВАНИЕ", fill=COL_ORANGE, font=F_SMALL, tags=("dyn",))
+                cv.create_text(W / 2, 830, text="РЕЖИМ: ВЫЖИВАНИЕ", fill=COL_ORANGE, font=F_SMALL, tags=("dyn",))
             elif isinstance(nm, tuple) and nm[0] == "campaign":
                 c = campaign.CAMPAIGNS[nm[1]]
-                cv.create_text(W / 2, 650, text="КАМПАНИЯ: %s · СТУПЕНЬ %d" % (c["name"], nm[2]),
+                cv.create_text(W / 2, 830, text="CAMPAIGN: %s · СТУПЕНЬ %d" % (c["name"], nm[2]),
                                fill=c["color"], font=F_SMALL, tags=("dyn",))
-            self.ui.button(cv, W / 2 - 150, 672, W / 2 + 150, 714, "В БОЙ!", self.start_fight, font=F_SMALL)
+            self.ui.button(cv, W / 2 - 150, 848, W / 2 + 150, 890, "В БОЙ!", self.start_fight, font=F_SMALL)
 
     def draw_shop(self):
         cv = self.cv
-        cv.create_text(W / 2 + 3, 93, text="МАГАЗИН БОЙЦОВ", font=F_BIG, fill="#2a0503", tags=("dyn",))
-        cv.create_text(W / 2, 90, text="МАГАЗИН БОЙЦОВ", font=F_BIG, fill=COL_GOLD, tags=("dyn",))
-        self.ui.coins(cv, W - 190, 50, self.coins)
-        keys = [k for k, v in HEROES.items() if v["rarity"] in ("common", "uncommon", "epic")]
+        cv.create_text(W / 2 + 3, 93, text="SHOP", font=F_BIG, fill="#2a0503", tags=("dyn",))
+        cv.create_text(W / 2, 90, text="SHOP", font=F_BIG, fill=COL_GOLD, tags=("dyn",))
+        self.ui.coins(cv, W - 360, 50, self.coins)
+        self.ui.gems(cv, W - 190, 50, self.gems)
+        self.ui.button(cv, W / 2 - 280, 116, W / 2 - 20, 148, "БОЙЦЫ",
+                       lambda: self._shop_tab("heroes"), font=F_SMALL)
+        self.ui.button(cv, W / 2 + 20, 116, W / 2 + 280, 148, "СУНДУКИ",
+                       lambda: self._shop_tab("chests"), font=F_SMALL)
+        if self.shop_tab == "heroes":
+            cv.create_rectangle(W / 2 - 280, 116, W / 2 - 20, 148, outline=COL_GOLD, width=3, tags=("dyn",))
+            self.draw_shop_heroes()
+        else:
+            cv.create_rectangle(W / 2 + 20, 116, W / 2 + 280, 148, outline=COL_GOLD, width=3, tags=("dyn",))
+            self.draw_chest_tab()
+        if self.shop_msg is not None:
+            txt, deadline = self.shop_msg
+            if time.time() < deadline:
+                cv.create_text(W / 2 + 2, 886, text=txt, font=F_MID, fill="#2a0503", tags=("dyn",))
+                cv.create_text(W / 2, 884, text=txt, font=F_MID, fill=COL_GOLD, tags=("dyn",))
+        self.ui.button(cv, 24, 24, 150, 70, "НАЗАД", self.goto_menu, font=F_SMALL)
+
+    def _shop_tab(self, tab):
+        self.shop_tab = tab
+
+    def draw_shop_heroes(self):
+        cv = self.cv
+        keys = [k for k, v in HEROES.items() if v["rarity"] in ("common", "uncommon", "epic", "mythic")]
         for i, key in enumerate(keys):
-            col, row = i % 5, i // 5
-            x0 = 20 + col * 248
-            y0 = 120 + row * 120
-            x1, y1 = x0 + 240, y0 + 112
+            col, row = i % 6, i // 6
+            x0 = 40 + col * 256
+            y0 = 170 + row * 140
+            x1, y1 = x0 + 248, y0 + 130
             hero = HEROES[key]
             owned = key in self.owned
             afford = self.coins >= hero["price"]
@@ -625,12 +871,87 @@ class Game(tk.Tk):
                 cv.create_text(x0 + 12, y1 - 18, text="%d МОНЕТ — КУПИТЬ" % hero["price"],
                                anchor="w", fill=price_col, font=F_SMALL, tags=("dyn",))
                 self.buttons.append((x0, y0, x1, y1, lambda k=key: self.buy_hero(k)))
-        if self.shop_msg is not None:
-            txt, deadline = self.shop_msg
-            if time.time() < deadline:
-                cv.create_text(W / 2 + 2, 672, text=txt, font=F_MID, fill="#2a0503", tags=("dyn",))
-                cv.create_text(W / 2, 670, text=txt, font=F_MID, fill=COL_GOLD, tags=("dyn",))
-        self.ui.button(cv, 24, 24, 150, 70, "НАЗАД", self.goto_menu, font=F_SMALL)
+
+    def draw_chest_tab(self):
+        cv = self.cv
+        cx = W // 2
+        t = time.time()
+        bob = math.sin(t * 2) * 6
+        cv.create_rectangle(cx - 340, 190, cx + 340, 800, fill="#1a0908",
+                            outline="#ff2a8a", width=3, tags=("dyn",))
+        cv.create_text(cx + 2, 234, text="СОКРОВИЩНИЦА ХАОСА", font=F_BIG, fill="#2a0503", tags=("dyn",))
+        cv.create_text(cx, 232, text="СОКРОВИЩНИЦА ХАОСА", font=F_BIG, fill="#ff2a8a", tags=("dyn",))
+        glow_r = 150 + math.sin(t * 3) * 10
+        cv.create_oval(cx - glow_r, 480 + bob - glow_r, cx + glow_r, 480 + bob + glow_r,
+                       outline="#ff2a8a", stipple="gray25", tags=("dyn",))
+        cv.create_rectangle(cx - 120, 400 + bob, cx + 120, 440 + bob, fill="#7a2210",
+                            outline="#2a0503", width=2, tags=("dyn",))
+        cv.create_rectangle(cx - 110, 440 + bob, cx + 110, 560 + bob, fill="#5a1c10",
+                            outline="#2a0503", width=2, tags=("dyn",))
+        cv.create_rectangle(cx - 16, 440 + bob, cx + 16, 480 + bob, fill=COL_GOLD,
+                            outline="#a1700a", width=2, tags=("dyn",))
+        cv.create_text(cx, 620, text="ЦЕНА: %d САМОЦВЕТОВ" % CHEST_COST, fill=COL_GEM,
+                       font=F_MID, tags=("dyn",))
+        cv.create_text(cx, 650, text="НЕОБЫЧНЫЙ 25% · ЭПИЧЕСКИЙ 18%", fill=COL_SAND,
+                       font=F_TINY, tags=("dyn",))
+        cv.create_text(cx, 672, text="МИФИЧЕСКИЙ 10% · DEVILY 5%", fill=COL_SAND,
+                       font=F_TINY, tags=("dyn",))
+        cv.create_text(cx, 694, text="МОНЕТЫ 42% (150-500) · повтор героя: компенсация", fill=COL_SAND,
+                       font=F_TINY, tags=("dyn",))
+        self.ui.button(cv, cx - 140, 720, cx + 140, 770, "ОТКРЫТЬ СУНДУК", self.buy_chest, font=F_SMALL)
+
+    def draw_chest_open(self):
+        cv = self.cv
+        cx = W // 2
+        if self.chest_reward is None:
+            self.collect_chest()
+            return
+        t = self.chest_t or 0.0
+        if t < 0.8:
+            jx = int(math.sin(t * 60) * 6)
+            jy = int(math.cos(t * 47) * 4)
+            cv.create_rectangle(cx - 120 + jx, 400 + jy, cx + 120 + jx, 440 + jy, fill="#7a2210",
+                                outline="#2a0503", width=2, tags=("dyn",))
+            cv.create_rectangle(cx - 110 + jx, 440 + jy, cx + 110 + jx, 560 + jy, fill="#5a1c10",
+                                outline="#2a0503", width=2, tags=("dyn",))
+            cv.create_rectangle(cx - 16 + jx, 440 + jy, cx + 16 + jx, 480 + jy, fill=COL_GOLD,
+                                outline="#a1700a", width=2, tags=("dyn",))
+            cv.create_text(cx, 300, text="...", font=F_HUGE, fill=COL_GOLD, tags=("dyn",))
+        elif t < 1.6:
+            p = (t - 0.8) / 0.8
+            r = 60 + 340 * p
+            cv.create_oval(cx - r, 480 - r, cx + r, 480 + r, outline=COL_GOLD if int(p * 4) % 2 else "#ff2a8a",
+                           width=4, tags=("dyn",))
+            cv.create_text(cx, 300, text="!!", font=F_HUGE, fill="#ff2a8a", tags=("dyn",))
+            self.parts.draw(cv)
+        else:
+            rw = self.chest_reward
+            card_col = COL_GOLD
+            if rw[0] in ("hero", "dupe"):
+                card_col = RARITY_COLOR.get(HEROES[rw[1]]["rarity"], COL_GOLD)
+            cv.create_rectangle(cx - 200, 250, cx + 200, 640, fill="#1a0908",
+                                outline=card_col, width=4, tags=("dyn",))
+            if rw[0] == "coins":
+                cv.create_text(cx, 300, text="+%d МОНЕТ" % rw[1], font=F_BIG, fill=COL_GOLD, tags=("dyn",))
+                cv.create_oval(cx - 48, 372, cx + 48, 468, fill=COL_GOLD, outline="#a1700a",
+                               width=3, tags=("dyn",))
+                cv.create_text(cx, 560, text="СОКРОВИЩНИЦА ХАОСА", font=F_TINY, fill=COL_SAND, tags=("dyn",))
+            else:
+                key = rw[1]
+                hero = HEROES[key]
+                rar = RARITY_LABEL.get(hero["rarity"], hero["rarity"].upper())
+                cv.create_text(cx, 300, text=("ПОВТОР: %s" if rw[0] == "dupe" else "%s") % hero["name"],
+                               font=F_BIG, fill=COL_GOLD, tags=("dyn",))
+                draw_hero_icon(cv, key, cx - 48, 420, 96)
+                cv.create_text(cx, 560, text=rar, font=F_MID,
+                               fill=RARITY_COLOR.get(hero["rarity"], COL_SAND), tags=("dyn",))
+                if rw[0] == "dupe":
+                    cv.create_text(cx, 590, text="Компенсация +%d МОНЕТ +10 САМ." % rw[2],
+                                   font=F_SMALL, fill=COL_GEM, tags=("dyn",))
+                else:
+                    cv.create_text(cx, 590, text="НОВЫЙ БОЕЦ!", font=F_SMALL, fill=COL_GEM, tags=("dyn",))
+            self.parts.draw(cv)
+            self.ui.button(cv, cx - 120, 680, cx + 120, 730, "ЗАБРАТЬ", self.collect_chest, font=F_SMALL)
 
     def draw(self):
         cv = self.cv
@@ -648,20 +969,24 @@ class Game(tk.Tk):
             self.draw_mode()
         elif st == "shop":
             self.draw_shop()
+        elif st == "info":
+            self.draw_info()
         elif st == "campaigns":
             self.draw_campaigns()
         elif st == "camp_stages":
             self.draw_camp_stages()
         elif st == "achievements":
             self.draw_achievements()
+        elif st == "chest_open":
+            self.draw_chest_open()
         elif st == "fight":
             if self.arena is not None:
                 self.arena.draw(cv, self.coins + (self.arena.run_reward if self.arena.survival else 0))
                 draw_ambient(cv, time.time(), self.arena.map)
                 draw_torches(cv, time.time(), self.arena.map)
                 if self.arena.phase == "end":
-                    self.ui.button(cv, W / 2 - 280, 470, W / 2 - 40, 530, "РЕВАНШ", self.start_fight, font=F_SMALL)
-                    self.ui.button(cv, W / 2 + 40, 470, W / 2 + 280, 530, "В МЕНЮ", self.goto_menu, font=F_SMALL)
+                    self.ui.button(cv, W / 2 - 280, 610, W / 2 - 40, 670, "РЕВАНШ", self.start_fight, font=F_SMALL)
+                    self.ui.button(cv, W / 2 + 40, 610, W / 2 + 280, 670, "В МЕНЮ", self.goto_menu, font=F_SMALL)
         self.draw_toasts(cv)
 
 

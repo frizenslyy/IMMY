@@ -4,7 +4,7 @@ import math
 import random
 import time
 
-from .config import COL_GOLD, H, MAX_EMBERS, MAX_PARTS, W
+from .config import COL_BLOOD, COL_GOLD, H, MAX_EMBERS, MAX_PARTS, W
 
 
 def update_parts(lst, dt):
@@ -62,6 +62,18 @@ class Particles:
         self.items.append({"x": x + random.uniform(-20, 20), "y": y - random.uniform(20, 140),
                            "vx": random.uniform(-15, 15), "vy": random.uniform(-90, -40),
                            "t": 0.9, "life": 0.9, "color": color, "r": 3.0, "g": -60})
+
+    def blood(self, x, y, n=3, dx_dir=0.0, big=False):
+        n = self._room(n)
+        for _ in range(n):
+            sp = random.uniform(120, 320) * (1.4 if big else 1.0)
+            a = random.uniform(-1.0, 0.9)
+            self.items.append({"x": x, "y": y,
+                               "vx": dx_dir * sp * random.uniform(0.4, 1.0) + math.cos(a) * 60,
+                               "vy": -abs(math.sin(a)) * sp - 40,
+                               "t": random.uniform(0.35, 0.75), "life": 0.75,
+                               "color": COL_BLOOD if random.random() < 0.7 else "#8a0e08",
+                               "r": random.uniform(2, 4.5) * (1.3 if big else 1.0), "g": 900})
 
     def dmg_text(self, x, y, n, color=COL_GOLD, big=False, txt=None):
         if not self._room(1):
