@@ -12,12 +12,12 @@ from immy import achievements as ach_mod
 from immy import campaign as camp_mod
 from immy.arena import Arena
 from immy.background import MAPS
-from immy.config import PARRY_STUN, exp_to_next
+from immy.config import GROUND_Y, PARRY_STUN, exp_to_next
 from immy.heroes import HEROES, RARITY_LABEL, STANDARD_KEYS
 from immy.sound import TRACKS, _render_track
 
 EMPTY_INP = {"move": 0, "jump": False, "crouch": False, "attack": False,
-             "cast": None, "parry": False, "special": None}
+             "cast": None, "parry": False, "special": None, "strike": None, "myth": False}
 
 
 def play(arena, frames, attack_every=13, cast_every=31, jump_every=47, seed=5):
@@ -46,20 +46,34 @@ def main():
         h = HEROES[hero]
         assert "stats" in h and set(h["stats"]) == {"str", "agi", "spd"}
         total = sum(h["stats"].values())
-        want = {"standard": 14, "common": 14, "uncommon": 17, "epic": 19, "exclusive": 17}[h["rarity"]]
+        want = {"standard": 14, "common": 14, "uncommon": 17, "epic": 19, "exclusive": 17,
+                "mythic": 21, "devil": 24}[h["rarity"]]
         assert total == want, (hero, total, want)
-        assert len(h["abilities"]) == (4 if h["rarity"] in ("uncommon", "epic", "exclusive") else 3)
+        assert len(h["abilities"]) == (4 if h["rarity"] != "standard" and
+                                        h["rarity"] != "common" else 3), hero
         assert h["rarity"] in RARITY_LABEL
         for ab in h["abilities"]:
             assert ab["cd"] > 0 and ab.get("desc")
         if h["rarity"] in ("epic", "exclusive"):
             assert h["abilities"][-1]["kind"] == "ult", hero
+        if h["rarity"] in ("mythic", "devil"):
+            assert h["abilities"][-1]["kind"] == "myth_ult", hero
+        assert h.get("pros") and h.get("cons"), hero
         a = Arena(hero, "EMBERY" if hero != "EMBERY" else "DEADY", 1, False)
         assert a.map in MAPS
         play(a, 12000)
         assert a.phase == "end", (hero, a.phase, a.wins_p, a.wins_b)
         assert a.wins_p + a.wins_b in (2, 3)
         print("hero", hero, "ok", a.wins_p, ":", a.wins_b, "round", a.round)
+
+    kinds = {}
+    for k, h in HEROES.items():
+        if h["rarity"] == "common":
+            ks = tuple(sorted(ab["kind"] for ab in h["abilities"]))
+            assert ks not in kinds, (k, ks, kinds.get(ks))
+            kinds[ks] = k
+    assert len(kinds) == 10
+    print("common kind-sets unique ok")
 
     a = Arena("LIGHTY", "DEADY", 10, True)
     assert a.boss and a.b.scale > 1.2
@@ -77,7 +91,7 @@ def main():
     a.register_hit(a.p, a.b, 50)
     for _ in range(130):
         a.update(1 / 60, dict(EMPTY_INP))
-    assert a.wave == 2 and a.run_reward == 60, (a.wave, a.run_reward)
+    assert a.wave == 2 and a.run_reward == 41, (a.wave, a.run_reward)
     assert a.phase == "intro" and not a.b.dead
     print("survival wave clear ok")
 
@@ -89,7 +103,7 @@ def main():
     a.register_hit(a.p, a.b, 50)
     for _ in range(130):
         a.update(1 / 60, dict(EMPTY_INP))
-    assert a.wave == 6 and a.run_reward == 60 + 150, (a.wave, a.run_reward)
+    assert a.wave == 6 and a.run_reward == 41 + 100, (a.wave, a.run_reward)
     print("survival mini-boss ok")
 
     a.p.hp = 1.0
@@ -97,7 +111,7 @@ def main():
     a.register_hit(a.b, a.p, 50)
     for _ in range(130):
         a.update(1 / 60, dict(EMPTY_INP))
-    assert a.phase == "end" and not a.win and a.reward == 210, (a.phase, a.reward)
+    assert a.phase == "end" and not a.win and a.reward == 141, (a.phase, a.reward)
     print("survival end reward ok")
 
     a = Arena("DEADY", "LIGHTY", 3, False)
@@ -149,12 +163,12 @@ def main():
     a = Arena("FROSTY", "EMBERY", 2, False)
     a.phase = "fight"
     a.cast_ability(a.p, 0, a.b)
-    assert len(a.proj) == 3, len(a.proj)
-    print("orb fan (count/spread) ok")
+    assert len(a.proj) == 1 and a.proj[0]["kind"] == "snare"
+    print("frosty snare ok")
 
     a = Arena("EMBERY", "DEADY", 2, False)
     a.phase = "fight"
-    a.b.y = 615.0
+    a.b.y = float(GROUND_Y)
     a.b.on_ground = True
     a.ai.level = 0
     a.ai.update = lambda *args: None
@@ -171,7 +185,7 @@ def main():
     a.cast_ability(a.p, 1, a.b)
     a.b.vy = -900.0
     a.b.on_ground = False
-    a.b.y = 615.0 - 200.0
+    a.b.y = float(GROUND_Y) - 200.0
     for _ in range(60):
         a.update(1 / 60, dict(EMPTY_INP))
     assert a.b.hp == a.b.max_hp
@@ -208,7 +222,7 @@ def main():
     assert a.p.hp == 65.0
     print("heal ok")
 
-    a = Arena("FROSTY", "EMBERY", 2, False)
+    a = Arena("SOLARY", "EMBERY", 2, False)
     a.phase = "fight"
     a.cast_ability(a.p, 2, a.b)
     assert a.p.buffs["flash"] > 0 and a.p.flash_mult == 0.5
@@ -234,7 +248,7 @@ def main():
 
     a = Arena("NECROY", "EMBERY", 2, False)
     a.phase = "fight"
-    a.cast_ability(a.p, 2, a.b)
+    a.cast_ability(a.p, 1, a.b)
     assert a.p.buffs["vamp"] > 0 and a.p.vamp_pct > 0.4
     a.p.hp = a.p.max_hp * 0.5
     hp0 = a.p.hp
@@ -331,7 +345,8 @@ def main():
     for key in HEROES:
         h = HEROES[key]
         sps = h.get("specials", [])
-        want = 3 if h["rarity"] in ("uncommon", "epic", "exclusive") else 2
+        want = 4 if h["rarity"] in ("mythic", "devil") else \
+            (3 if h["rarity"] in ("uncommon", "epic", "exclusive") else 2)
         assert len(sps) == want, (key, len(sps))
         combos = [sp["combo"] for sp in sps]
         assert len(set(combos)) == len(combos) and all(c in ("as", "ws", "wa", "wd") for c in combos)
@@ -365,6 +380,106 @@ def main():
     assert a.p.energy == e
     print("special energy gate ok")
 
+    a = Arena("EMBERY", "DEADY", 2, False)
+    a.phase = "fight"
+    a.ai.update = lambda *args: None
+    a.b.x = a.p.x + 90
+    a.b.on_ground = True
+    hp0 = a.b.hp
+    assert a.p.try_strike("kick", a)
+    assert len(a.strikes) == 1 and a.p.strike_cds["kick"] > 0
+    assert not a.p.try_strike("kick", a)
+    for _ in range(30):
+        a.update(1 / 60, dict(EMPTY_INP))
+    assert a.b.hp < hp0, (hp0, a.b.hp)
+    print("kick strike ok, dmg:", round(hp0 - a.b.hp, 1))
+
+    a = Arena("EMBERY", "DEADY", 2, False)
+    a.phase = "fight"
+    a.ai.update = lambda *args: None
+    a.b.x = a.p.x + 80
+    hp0 = a.b.hp
+    assert a.p.try_strike("upper", a)
+    for _ in range(30):
+        a.update(1 / 60, dict(EMPTY_INP))
+    assert a.b.hp < hp0
+    assert a.b.vy < 0 or not a.b.on_ground, (a.b.vy, a.b.on_ground)
+    print("uppercut launcher ok")
+
+    a = Arena("EMBERY", "DEADY", 2, False)
+    a.phase = "fight"
+    a.b.x = a.p.x + 90
+    assert not a.p.try_strike("air", a)
+    a.p.on_ground = False
+    a.p.y = 500.0
+    assert a.p.try_strike("air", a)
+    print("air strike gating ok")
+
+    a = Arena("EMBERY", "DEADY", 2, False)
+    a.phase = "fight"
+    a.ai.update = lambda *args: None
+    a.b.x = a.p.x + 90
+    a.b.injury = None
+    real_random = random.random
+    random.random = lambda: 0.0
+    try:
+        hp0 = a.b.hp
+        a.register_hit(a.p, a.b, 20)
+    finally:
+        random.random = real_random
+    assert a.b.injury and a.b.injury["kind"] in ("str", "spd", "jump", "ability"), a.b.injury
+    a2 = Arena("EMBERY", "DEADY", 2, False)
+    a2.phase = "fight"
+    a2.b.injury = {"kind": "str", "ability": 0}
+    f0 = a2.b.dmg_factor()
+    a2.b.injury = None
+    assert f0 < a2.b.dmg_factor()
+    a2.b.injury = {"kind": "jump", "ability": 0}
+    assert not a2.b.can_jump()
+    a2.b.injury = {"kind": "spd", "ability": 0}
+    assert a2.b.eff_speed() < a2.b.stat_spd
+    a2.b.injury = {"kind": "ability", "ability": 0}
+    assert not a2.cast_ability(a2.b, 0, a2.p)
+    print("injury effects ok")
+
+    a = Arena("NECROMANCERY", "EMBERY", 2, False)
+    a.phase = "fight"
+    a.ai.update = lambda *args: None
+    a.p.energy = 30.0
+    a.b.hp = a.b.max_hp * 0.2
+    assert not a.myth_ready(a.p, a.b)
+    a.p.energy = 100.0
+    a.p.cds[0] = 5.0
+    assert not a.myth_ready(a.p, a.b)
+    a.p.cds[0] = 0.0
+    a.b.hp = a.b.max_hp * 0.5
+    assert not a.myth_ready(a.p, a.b)
+    a.b.hp = a.b.max_hp * 0.2
+    assert a.myth_ready(a.p, a.b)
+    assert a.try_myth_ult(a.p, a.b)
+    assert a.p.energy == 50.0 and a.p.cds[0] > 0 and a.p.cds[3] > 0
+    assert any(fx["kind"] == "myth_necromancery" for fx in a.fx)
+    for _ in range(110):
+        a.update(1 / 60, dict(EMPTY_INP))
+    assert a.b.hp < a.b.max_hp * 0.2
+    print("myth ult gating + cast ok")
+
+    a = Arena("EMBERY", "DEADY", 2, False)
+    a.phase = "fight"
+    a.ai.update = lambda *args: None
+    a.b.x = a.p.x + 80
+    n0 = len(a.parts.items)
+    a.register_hit(a.p, a.b, 20)
+    blood_parts = [it for it in a.parts.items if it.get("color") == "#c4140f"]
+    assert len(blood_parts) > n0 - n0 and blood_parts, "no blood particles"
+    print("blood on hit ok")
+
+    a = Arena("DEADY", "LIGHTY", 1, False)
+    a.phase = "fight"
+    a.ai.update = lambda *args: None
+    a.p.energy = 100.0
+    a.b.x = a.p.x + 120
+    assert a.cast_special(a.p, "as", a.b)
     a.p.special_cd = 0.0
     a.p.energy = 100.0
     assert not a.cast_special(a.p, "as", a.b)
@@ -391,7 +506,7 @@ def main():
     a.b.x = a.p.x + 200
     assert a.cast_ability(a.p, 0, a.b)
     assert a.fx and a.fx[0]["kind"] == "geyser_warn"
-    a.b.y = 615.0
+    a.b.y = float(GROUND_Y)
     a.b.on_ground = True
     for _ in range(60):
         a.update(1 / 60, dict(EMPTY_INP))
@@ -455,18 +570,19 @@ def main():
     print("exp curve ok")
 
     save_mod.SAVE_FILE = tempfile.mktemp(suffix=".json")
-    save_mod.save_save({"coins": 777, "bot_level": 4, "owned": ["DEADY", "FROSTY", "BANEY"],
+    save_mod.save_save({"coins": 777, "gems": 42, "bot_level": 4,
+                        "owned": ["DEADY", "FROSTY", "BANEY"],
                         "exp": 30, "plvl": 2, "camp": {"0": {"stage": 3, "done": False}},
                         "camp_claimed": [], "ach": ["w1"],
                         "stats": {"wins": 1, "coins_earned": 1000}})
     d = save_mod.load_save()
-    assert d["coins"] == 777 and d["bot_level"] == 4
+    assert d["coins"] == 777 and d["gems"] == 42 and d["bot_level"] == 4
     assert d["owned"] == ["DEADY", "FROSTY", "BANEY"]
     assert d["plvl"] == 2 and d["exp"] == 30
     assert d["camp"]["0"]["stage"] == 3 and d["ach"] == ["w1"]
     assert d["stats"]["wins"] == 1 and d["stats"]["coins_earned"] == 1000
     assert set(STANDARD_KEYS) <= set(HEROES)
-    print("save/load v2 ok")
+    print("save/load v3 ok")
 
     d = save_mod.default_save()
     d["stats"]["wins"] = 5
@@ -474,15 +590,26 @@ def main():
     assert [x["id"] for x in granted] == ["w1", "w5"], granted
     assert d["coins"] == 150 and "w1" in d["ach"] and "w5" in d["ach"]
     assert ach_mod.check(d) == []
-    assert len(ach_mod.ACHIEVEMENTS) == 45
-    print("achievements grant ok")
+    assert len(ach_mod.ACHIEVEMENTS) == 123, len(ach_mod.ACHIEVEMENTS)
+    n_gem = sum(1 for a in ach_mod.ACHIEVEMENTS if a.get("gems"))
+    assert n_gem > 40, n_gem
+    d2 = save_mod.default_save()
+    ga = next(a for a in ach_mod.ACHIEVEMENTS if a.get("gems"))
+    d2["stats"][ga["stat"]] = ga["goal"]
+    granted2 = ach_mod.check(d2)
+    assert ga["id"] in [x["id"] for x in granted2]
+    assert d2["gems"] == ga["gems"] and d2["stats"]["gems_earned"] == ga["gems"]
+    print("achievements 123 + gems grant ok")
 
-    assert sum(c["stages"] for c in camp_mod.CAMPAIGNS) == 37
-    assert camp_mod.stage_level(0, 1) == 1 and camp_mod.stage_level(0, 10) == 15
+    assert sum(c["stages"] for c in camp_mod.CAMPAIGNS) == 165
+    assert len(camp_mod.CAMPAIGNS) == 13
+    assert camp_mod.stage_level(0, 1) == 1 and camp_mod.stage_level(0, 10) == 13
     assert camp_mod.is_final(0, 10) and not camp_mod.is_final(0, 9)
+    hero_rewards = [c for c in camp_mod.CAMPAIGNS if c["reward"]["type"] == "hero"]
+    gem_rewards = [c for c in camp_mod.CAMPAIGNS if c["reward"]["type"] == "gems"]
+    assert len(hero_rewards) == 6 and len(gem_rewards) == 3
+    assert all(camp_mod.reward_label(c) for c in camp_mod.CAMPAIGNS)
     d = save_mod.default_save()
-    assert not camp_mod.unlocked(0, d)
-    d["plvl"] = 5
     assert camp_mod.unlocked(0, d) and not camp_mod.unlocked(1, d)
     d["camp"]["0"] = {"stage": 10, "done": True}
     assert camp_mod.unlocked(1, d)

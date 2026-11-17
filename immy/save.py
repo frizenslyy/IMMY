@@ -1,4 +1,4 @@
-"""IMMY — сохранение прогресса (монеты, EXP, уровни, кампании, достижения) в JSON."""
+"""IMMY — сохранение прогресса (монеты, самоцветы, EXP, уровни, кампании, достижения) в JSON."""
 
 import json
 
@@ -7,11 +7,12 @@ from .heroes import HEROES, STANDARD_KEYS
 
 DEFAULT_STATS = {"wins": 0, "bosses": 0, "waves": 0, "specials": 0, "ults": 0,
                  "finishers": 0, "parries": 0, "max_combo": 0, "coins_earned": 0,
-                 "buys": 0, "camp_stages": 0, "camps": 0}
+                 "buys": 0, "camp_stages": 0, "camps": 0, "strikes": 0, "injuries": 0,
+                 "myth_ults": 0, "chests": 0, "gems_earned": 0}
 
 
 def default_save():
-    return {"coins": 0, "bot_level": 1, "owned": list(STANDARD_KEYS), "exp": 0,
+    return {"coins": 0, "gems": 0, "bot_level": 1, "owned": list(STANDARD_KEYS), "exp": 0,
             "plvl": 1, "camp": {}, "camp_claimed": [], "ach": [],
             "stats": dict(DEFAULT_STATS)}
 
@@ -26,6 +27,7 @@ def load_save():
     if not isinstance(raw, dict):
         return d
     d["coins"] = int(raw.get("coins", 0))
+    d["gems"] = max(0, int(raw.get("gems", 0)))
     d["bot_level"] = max(1, int(raw.get("bot_level", 1)))
     owned = [k for k in raw.get("owned", []) if k in HEROES]
     d["owned"] = owned if owned else list(STANDARD_KEYS)

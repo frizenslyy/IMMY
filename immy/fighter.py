@@ -4,9 +4,18 @@ import math
 import random
 
 from .config import (COMBO_MULT, COMBO_WINDOW, CRIT_MULT, GROUND_Y, GRAVITY,
-                     PARRY_CD, PARRY_WINDOW, W, WALL)
+                     KICK_CD, PARRY_CD, PARRY_WINDOW, UPPERCUT_CD, W, WALL)
 from .heroes import HEROES
 from .util import clamp
+
+STRIKES = {
+    "kick":  {"dur": 0.24, "cd": KICK_CD, "delay": 0.10},
+    "upper": {"dur": 0.30, "cd": UPPERCUT_CD, "delay": 0.13},
+    "sweep": {"dur": 0.26, "cd": 1.2, "delay": 0.11},
+    "air":   {"dur": 0.26, "cd": 1.0, "delay": 0.09},
+    "dive":  {"dur": 0.34, "cd": 1.2, "delay": 0.16},
+}
+STRIKE_KINDS = tuple(STRIKES)
 
 
 class Fighter:
@@ -57,6 +66,8 @@ class Fighter:
         self.energy = 0.0
         self.special_cd = 0.0
         self.sp_cds = {}
+        self.strike_cds = {}
+        self.injury = None
         self.poison_t = 0.0
         self.poison_dps = 0.0
         self.poison_tick = 0.0
@@ -97,6 +108,43 @@ class Fighter:
         self.attack_kind = "melee"
         game.melee.append([self, 0.12, self.combo])
 
+    def try_strike(self, kind, game):
+        if kind not in STRIKES:
+            return False
+        if self.dead or self.stun_t > 0 or self.hurt_t > 0:
+            return False
+        if self.attack_cd > 0 or self.attack_t > 0:
+            return False
+        if self.strike_cds.get(kind, 0.0) > 0:
+            return False
+        if self.has_scythe and self.scythe_out:
+            return False
+        if kind in ("air", "dive") and self.on_ground:
+            return False
+        if kind == "sweep" and not (self.crouch and self.on_ground):
+            return False
+        spec = STRIKES[kind]
+        if self.combo_t > 0:
+            self.combo = (self.combo + 1) % 3
+        else:
+            self.combo = 0
+        self.combo_t = COMBO_WINDOW
+        self.attack_t = spec["dur"]
+        self.attack_cd = spec["dur"] + 0.14
+        self.attack_kind = kind
+        self.strike_cds[kind] = spec["cd"]
+        game.strikes.append([self, spec["delay"], kind, self.combo])
+        return True
+
+    def can_jump(self):
+        return not (self.injury and self.injury["kind"] == "jump")
+
+    def dmg_factor(self):
+        f = self.stat_dmg
+        if self.injury and self.injury["kind"] == "str":
+            f *= 0.75
+        return f
+
     def try_parry(self):
         if self.dead or self.stun_t > 0 or self.root_t > 0 or self.parry_cd > 0 or self.parry_t > 0:
             return False
@@ -106,7 +154,7 @@ class Fighter:
 
     def roll_damage(self, base):
         crit = random.random() < self.crit_chance
-        dmg = base * self.stat_dmg * self.out_mult()
+        dmg = base * self.dmg_factor() * self.out_mult()
         if crit:
             dmg *= CRIT_MULT
         return dmg, crit
@@ -119,16 +167,18 @@ class Fighter:
         m = self.speed_mult * self.stat_spd
         if self.buffs["swift"] > 0:
             m *= 1.45
+        if self.injury and self.injury["kind"] == "spd":
+            m *= 0.7
         return m
 
-    def take_damage(self, dmg, kb_dir=0.0, stun=0.0, kb_force=None):
+    def take_damage(self, dmg, kb_dir=0.0, stun=0.0, kb_force=None, pierce_guard=False):
         if self.dead or self.buffs["soul"] > 0:
             return "miss"
         if self.parry_t > 0:
             self.parry_t = 0.0
             self.parry_flash = 0.3
             return "parry"
-        if self.buffs["guard"] > 0:
+        if self.buffs["guard"] > 0 and not pierce_guard:
             return "guard"
         if self.buffs["flash"] > 0:
             dmg *= self.flash_mult
@@ -161,6 +211,8 @@ class Fighter:
         self.special_cd = max(0.0, self.special_cd - dt)
         for k in self.sp_cds:
             self.sp_cds[k] = max(0.0, self.sp_cds[k] - dt)
+        for k in self.strike_cds:
+            self.strike_cds[k] = max(0.0, self.strike_cds[k] - dt)
         self.root_t = max(0.0, self.root_t - dt)
         if self.poison_t > 0:
             self.poison_t = max(0.0, self.poison_t - dt)
@@ -294,8 +346,9 @@ class Fighter:
 
         prog = 0.0
         attacking = self.attack_t > 0 and self.attack_kind == "melee"
-        if attacking:
-            prog = 1 - self.attack_t / 0.28
+        striking = self.attack_t > 0 and self.attack_kind in STRIKE_KINDS
+        if attacking or striking:
+            prog = 1 - self.attack_t / (0.28 if attacking else STRIKES[self.attack_kind]["dur"])
             X += fc * (9 + 4 * self.combo) * s * math.sin(prog * math.pi)
 
         if walking:
@@ -320,6 +373,29 @@ class Fighter:
             R(14, shoulder + 2 + bob, 14 + ext, shoulder + 15 + bob, body)
             R(-26, shoulder + 6 + bob, -15, shoulder + 44 + bob, body2)
             R(14 + ext - 8, shoulder - 1 + bob, 14 + ext + 2, shoulder + 18 + bob, C["bone"])
+        elif striking:
+            sw_ext = 34 + 30 * math.sin(prog * math.pi)
+            kind = self.attack_kind
+            if kind == "kick":
+                R(-8, hip - 8, 6, hip + 16, body2)
+                R(6, hip - 12, 6 + sw_ext, hip - 2, body)
+                R(6 + sw_ext - 8, hip - 12, 6 + sw_ext + 2, hip - 2, C["bone"])
+            elif kind == "upper":
+                R(12, shoulder - sw_ext + 6, 24, shoulder + 12, body)
+                R(12, shoulder - sw_ext, 24, shoulder - sw_ext + 10, C["bone"])
+                R(-26, shoulder + 6, -15, shoulder + 40, body2)
+            elif kind == "sweep":
+                R(-8, hip - 4, 4, hip + leg_h - 6, body2)
+                R(4, hip + leg_h - 14, 4 + sw_ext, hip + leg_h, body)
+                R(4 + sw_ext - 8, hip + leg_h - 14, 4 + sw_ext + 2, hip + leg_h - 4, C["bone"])
+            elif kind == "air":
+                R(10, shoulder - 4, 22, shoulder - sw_ext * 0.7, body)
+                R(10, shoulder - sw_ext * 0.7 - 8, 22, shoulder - sw_ext * 0.7, C["bone"])
+                R(-14, hip - 4, -4, hip + leg_h + 8, body2)
+            else:
+                R(8, shoulder, 20, shoulder + sw_ext, body)
+                R(8, shoulder + sw_ext - 8, 20, shoulder + sw_ext, C["bone"])
+                R(-20, hip - 18, -8, hip + 6, body2)
         elif walking:
             sw2 = math.sin(ph) * 5
             R(15 + sw2, shoulder + 4 + bob, 26 + sw2, shoulder + 42 + bob, body)
@@ -395,6 +471,27 @@ class Fighter:
             a0 = -45 if fc > 0 else 135
             cv.create_arc(X - 78 * s, Y - 160 * s, X + 78 * s, Y - 4 * s, start=a0, extent=90,
                           style="arc", outline=accent, width=4, tags=("dyn",))
+        elif striking:
+            kind = self.attack_kind
+            col = C["glow"] if kind in ("upper", "dive") else accent
+            if kind == "kick":
+                a0 = -20 if fc > 0 else 110
+                cv.create_arc(X - 92 * s, Y - 120 * s, X + 92 * s, Y + 30 * s, start=a0, extent=55,
+                              style="arc", outline=col, width=4, tags=("dyn",))
+            elif kind == "upper":
+                a0 = 20 if fc > 0 else 70
+                cv.create_arc(X - 70 * s, Y - 210 * s, X + 70 * s, Y - 60 * s, start=a0, extent=100,
+                              style="arc", outline=col, width=5, tags=("dyn",))
+            elif kind == "sweep":
+                a0 = 15 if fc > 0 else 105
+                cv.create_arc(X - 96 * s, Y - 60 * s, X + 96 * s, Y + 34 * s, start=a0, extent=60,
+                              style="arc", outline=col, width=4, tags=("dyn",))
+            elif kind == "air":
+                cv.create_line(X, Y - 150 * s, X + fc * 26 * s, Y - 90 * s,
+                               fill=col, width=4, tags=("dyn",), stipple="gray25")
+            else:
+                cv.create_line(X - fc * 20 * s, Y - 150 * s, X + fc * 40 * s, Y - 60 * s,
+                               fill=col, width=5, tags=("dyn",), stipple="gray25")
 
         if self.stun_t > 0:
             hy0 = Y + (head_t - 16) * s
@@ -441,3 +538,7 @@ class Fighter:
         if self.combo_t > 0 and self.combo >= 2 and self.attack_t > 0:
             cv.create_text(X, Y + (head_t - 34) * s, text="COMBO x%d" % (self.combo + 1),
                            fill=C["glow"], font=("Courier", 12, "bold"), tags=("dyn",))
+
+        if self.injury:
+            cv.create_text(X, Y + (head_t - 20) * s, text="✖",
+                           fill="#c4140f", font=("Courier", 13, "bold"), tags=("dyn",))
