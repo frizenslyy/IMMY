@@ -10,6 +10,8 @@ from .config import NET_DISCOVER_PORT, NET_FIGHT_PORT, NET_SCAN_TIMEOUT
 
 REQ = "IMMY_DISCOVER:"
 ANS = "IMMY_HERE:"
+SEEK = "IMMY_SEEK:"
+SEEKOK = "IMMY_SEEKOK:"
 
 
 def host_name():
@@ -33,6 +35,8 @@ class Discovery:
     def __init__(self):
         self.sid = uuid.uuid4().hex[:8]
         self.peers = {}
+        self.peer_sids = {}
+        self.seeking = False
         self.hosting = False
         self._lock = threading.Lock()
         self._run = True
@@ -71,12 +75,28 @@ class Discovery:
                 if sid != self.sid:
                     with self._lock:
                         self.peers[addr[0]] = (name[:22] or "PC", time.time())
+                        self.peer_sids[addr[0]] = sid
                     self._reply(addr)
             elif msg.startswith(ANS):
                 sid, _, name = msg[len(ANS):].partition("|")
                 if sid != self.sid:
                     with self._lock:
                         self.peers[addr[0]] = (name[:22] or "PC", time.time())
+                        self.peer_sids[addr[0]] = sid
+            elif msg.startswith(SEEK):
+                sid, _, name = msg[len(SEEK):].partition("|")
+                if sid != self.sid:
+                    with self._lock:
+                        self.peers[addr[0]] = (name[:22] or "PC", time.time())
+                        self.peer_sids[addr[0]] = sid
+                    if self.seeking:
+                        self._reply_seek(addr)
+            elif msg.startswith(SEEKOK):
+                sid, _, name = msg[len(SEEKOK):].partition("|")
+                if sid != self.sid:
+                    with self._lock:
+                        self.peers[addr[0]] = (name[:22] or "PC", time.time())
+                        self.peer_sids[addr[0]] = sid
 
     def _reply(self, addr):
         try:
@@ -84,9 +104,17 @@ class Discovery:
         except OSError:
             pass
 
-    def scan(self):
+    def _reply_seek(self, addr):
+        try:
+            self.sock.sendto((SEEKOK + self.sid + "|" + host_name()).encode(), addr)
+        except OSError:
+            pass
+
+    def scan(self, mode="friend"):
         out = {}
-        msg = (REQ + self.sid + "|" + host_name()).encode()
+        sids = {}
+        prefix = SEEK if mode == "online" else REQ
+        msg = (prefix + self.sid + "|" + host_name()).encode()
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -109,6 +137,12 @@ class Discovery:
                     sid, _, name = m[len(ANS):].partition("|")
                     if sid != self.sid:
                         out[addr[0]] = name[:22] or "PC"
+                        sids[addr[0]] = sid
+                elif m.startswith(SEEKOK):
+                    sid, _, name = m[len(SEEKOK):].partition("|")
+                    if sid != self.sid:
+                        out[addr[0]] = name[:22] or "PC"
+                        sids[addr[0]] = sid
             s.close()
         except OSError:
             pass
@@ -117,9 +151,10 @@ class Discovery:
             for ip, (name, t) in list(self.peers.items()):
                 if now - t < 8.0:
                     out.setdefault(ip, name)
+                    sids.setdefault(ip, self.peer_sids.get(ip, ""))
                 else:
                     del self.peers[ip]
-        return sorted(out.items(), key=lambda kv: kv[1].lower())
+        return sorted(out.items(), key=lambda kv: kv[1].lower()), sids
 
     def close(self):
         self._run = False

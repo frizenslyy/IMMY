@@ -1,4 +1,4 @@
-"""IMMY — кампании: 13 кампаний для новичков и профи, награды: герои, монеты, самоцветы."""
+"""IMMY — кампании: 23 кампании для новичков и профи, награды: герои, монеты, самоцветы."""
 
 CAMPAIGNS = [
     {"name": "АРЕНЫ НОВИЧКА", "desc": "Первые шаги бойца: 10 лёгких ступеней.",
@@ -27,6 +27,26 @@ CAMPAIGNS = [
      "stages": 15, "base": 18, "step": 2.3, "reward": {"type": "hero", "hero": "CHAOSY"}, "color": "#e04aff"},
     {"name": "ПОСЛЕДНИЙ РАУНД", "desc": "Испытание для профи: 15 ступеней богов.",
      "stages": 15, "base": 20, "step": 2.5, "reward": {"type": "hero", "hero": "TITANY"}, "color": "#ff2a8a"},
+    {"name": "ОГНЕННЫЕ ВРАТА", "desc": "Врата в пламенный предел: 12 ступеней.",
+     "stages": 12, "base": 24, "step": 2.4, "reward": {"type": "gems"}, "color": "#ff5a1a"},
+    {"name": "КОРРОЗИЯ", "desc": "Ржавчина и металл: 12 ступеней.",
+     "stages": 12, "base": 26, "step": 2.4, "reward": {"type": "coins"}, "color": "#9aa4ae"},
+    {"name": "НЕДРА ГЛУБИН", "desc": "Темницы без дна: 13 ступеней.",
+     "stages": 13, "base": 28, "step": 2.5, "reward": {"type": "gems"}, "color": "#4ac9ff"},
+    {"name": "ЛЕГИОН ТЕНЕЙ", "desc": "Армия теней: 13 ступеней.",
+     "stages": 13, "base": 30, "step": 2.6, "reward": {"type": "coins"}, "color": "#5a646e"},
+    {"name": "ГРОЗОВОЙ ФРОНТ", "desc": "Буря не умолкает: 14 ступеней.",
+     "stages": 14, "base": 33, "step": 2.6, "reward": {"type": "gems"}, "color": "#5ab4d9"},
+    {"name": "ЦИТАДЕЛЬ БУРИ", "desc": "Обитель ветров: 14 ступеней.",
+     "stages": 14, "base": 36, "step": 2.7, "reward": {"type": "coins"}, "color": "#bfe9ff"},
+    {"name": "ПРОКЛЯТЫЕ ЗВЕЗДЫ", "desc": "Звезды мертвцов: 15 ступеней.",
+     "stages": 15, "base": 39, "step": 2.8, "reward": {"type": "gems"}, "color": "#e04aff"},
+    {"name": "КОЛЕСО ПУСТОТЫ", "desc": "Вращение бездны: 15 ступеней.",
+     "stages": 15, "base": 42, "step": 2.9, "reward": {"type": "coins"}, "color": "#9a5cff"},
+    {"name": "ТРОН ВСЕЛЕННОЙ", "desc": "Престол миров: 16 ступеней.",
+     "stages": 16, "base": 46, "step": 3.0, "reward": {"type": "gems"}, "color": "#ffc400"},
+    {"name": "ИСПЫТАНИЕ БЕССМЕРТНЫХ", "desc": "Лишь боги выйдут: 16 ступеней.",
+     "stages": 16, "base": 50, "step": 3.2, "reward": {"type": "coins"}, "color": "#fff2b0"},
 ]
 
 UNLOCK_PLVL = 1

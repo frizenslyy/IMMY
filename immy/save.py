@@ -8,7 +8,10 @@ from .heroes import HEROES, STANDARD_KEYS
 DEFAULT_STATS = {"wins": 0, "bosses": 0, "waves": 0, "specials": 0, "ults": 0,
                  "finishers": 0, "parries": 0, "max_combo": 0, "coins_earned": 0,
                  "buys": 0, "camp_stages": 0, "camps": 0, "strikes": 0, "injuries": 0,
-                 "myth_ults": 0, "chests": 0, "gems_earned": 0}
+                 "myth_ults": 0, "chests": 0, "gems_earned": 0, "fatalities": 0,
+                 "online_wins": 0, "martyr_wins": 0, "max_damage": 0, "casts": 0,
+                 "bleeds": 0, "chains": 0, "saws": 0, "roars": 0, "aoes": 0,
+                 "haze": 0, "legend_ults": 0}
 
 
 def default_save():

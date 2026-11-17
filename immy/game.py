@@ -23,7 +23,7 @@ from .ui import Ui
 
 CYR_CHAR = {"ц": "w", "ф": "a", "ы": "s", "в": "d", "а": "f", "у": "e"}
 CYR_NAME = {"tse": "w", "ef": "a", "yeru": "s", "ve": "d", "a": "f", "u": "e"}
-VK_MAP = {87: "w", 65: "a", 83: "s", 68: "d", 70: "f", 69: "e"}
+VK_MAP = {87: "w", 65: "a", 83: "s", 68: "d", 70: "f", 69: "e", 82: "r"}
 ARROWS = {"left": "a", "right": "d", "up": "w", "down": "s"}
 
 INFO_STRIKES = [
@@ -58,6 +58,25 @@ INFO_MECH = [
     ("СИЛА РЕДКОСТИ (против бота): НЕОБЫЧНЫЙ +6% · ЭКСКЛЮЗИВНЫЙ +10% · ЭПИЧЕСКИЙ +13% · МИФИЧЕСКИЙ +20% · DEVILY +28%", COL_GOLD),
     ("ФАТАЛИТИ: после победы над БОССОМ и в бою с другом экран темнеет — успей набрать комбо: +%d монет и +%d самоцвета" % (FATALITY_BONUS, FATALITY_GEMS), COL_RED),
     ("FRIEND: бой с другом по локальной сети — система находит компьютеры сам, сила всех героев равна", COL_SAND),
+]
+
+
+INFO_MODES = [
+    ("МУЧЕНИК: 3 раунда против врага x6 HP и x4 урона — нанесите максимум урона", COL_RED),
+    ("МУЧЕНИК: победа (2 раунда) = 100 самоцветов · поражение = монеты за урон", COL_GEM),
+    ("ЛЕГЕНДАРНЫЙ — новая редкость: 5 героев, 4 способности, сильнейший ульт", COL_GOLD),
+    ("УЛЬТА (R): полная энергия + полная шкала УЛЬТЫ; легендарным также враг <30% HP", "#ff2a8a"),
+    ("ШКАЛА УЛЬТЫ (розовая, под энергией): заполняется от нанесённых и полученных ударов", "#ff2a8a"),
+    ("МИФ-УЛЬТА (R или 1+4): обе способности готовы, полная энергия, враг ≤25% HP", "#ff2a8a"),
+    ("ПОМУТНЕНИЕ РАЗУМА: враг бьёт себя своей первой способностью", COL_SAND),
+    ("ЦЕПИ СУДЬБЫ: цепи тащат врага по полу к вам, нанося урон и обездвиживая", COL_SAND),
+    ("ПИЛЫ: выезжают из пола с двух сторон, ранят обоих бойцов, кровотечение 4с", COL_BLOOD),
+    ("AoE ВЗРЫВ: урон вокруг себя · ЗЛОБНЫЙ РЫК: волна урона + подброс врага", COL_SAND),
+    ("ЗЛОБНЫЙ РЫК можно парировать — тогда враг не теряет контроль", COL_SAND),
+    ("ШИПЫ: возвращают 30% урона в ближнем бою · РИПОСТА после парирования: x1.3", COL_SAND),
+    ("КРОВОТЕЧЕНИЕ наносит урон со временем; переломы видны на модели бойца", COL_BLOOD),
+    ("ONLINE: автоматический поиск противника · FRIEND: выбор компьютера в LAN", COL_GOLD),
+    ("23 кампании · 305 ступеней · ЛЕГЕНДАРНЫЙ герой: 25000 монет или из сундука", COL_GEM),
 ]
 
 
@@ -126,6 +145,9 @@ class Game(tk.Tk):
         self.camp_ctx = None
         self.ach_page = 0
         self.net_role = None
+        self.net_mode = "friend"
+        self.net_sids = {}
+        self.online_t = 0.0
         self.net = None
         self.net_host = None
         self.disc = None
@@ -238,15 +260,25 @@ class Game(tk.Tk):
         self.set_state("achievements")
 
     def goto_net(self):
+        self._net_enter("friend")
+
+    def goto_online(self):
+        self._net_enter("online")
+
+    def _net_enter(self, mode):
         self.leave_net_soft()
         self.net_msg = ""
         self.net_peers = []
+        self.net_sids = {}
+        self.net_mode = mode
+        self.online_t = 0.0
         self.disc = netplay.Discovery()
+        self.disc.seeking = mode == "online"
         self.net_host = netplay.Host()
         if not self.net_host.alive:
             self.net_msg = "ХОСТ-ПОРТ ЗАНЯТ: ВЫ СМОЖЕТЕ ТОЛЬКО ПОДКЛЮЧАТЬСЯ"
         self.set_state("net_scan")
-        self.net_peers = self.disc.scan()
+        self.net_peers, self.net_sids = self.disc.scan(mode)
 
     def leave_net(self):
         if self.net is not None:
@@ -308,11 +340,13 @@ class Game(tk.Tk):
         r = random.random()
         if r < 0.05:
             return ("hero", "DEVILY")
-        if r < 0.15:
+        if r < 0.13:
             return ("hero", random.choice(self.chest_keys("mythic")))
-        if r < 0.33:
+        if r < 0.20:
+            return ("hero", random.choice(self.chest_keys("legendary")))
+        if r < 0.36:
             return ("hero", random.choice(self.chest_keys("epic")))
-        if r < 0.58:
+        if r < 0.60:
             return ("hero", random.choice(self.chest_keys("uncommon")))
         return ("coins", random.randint(150, 500))
 
@@ -352,6 +386,10 @@ class Game(tk.Tk):
         self.camp_ctx = None
         if nm == "survival":
             self.arena = Arena(self.hero_sel, "DEADY", 1, False, map=random.choice(MAPS), survival=True)
+        elif nm == "martyr":
+            bot_key = random.choice([k for k in HEROES if k != self.hero_sel])
+            self.arena = Arena(self.hero_sel, bot_key, self.bot_level, False,
+                               map=random.choice(MAPS), martyr=True)
         elif isinstance(nm, tuple) and nm[0] == "campaign":
             _, idx, stage = nm
             level = campaign.stage_level(idx, stage)
@@ -391,6 +429,8 @@ class Game(tk.Tk):
                 self.events.add("kick")
             elif k in ("1", "2", "3", "4"):
                 self.events.add(k)
+            elif k == "r":
+                self.events.add("r")
         self.keys.add(k)
 
     def on_key_release(self, e):
@@ -421,7 +461,7 @@ class Game(tk.Tk):
     def build_input(self):
         inp = {"move": 0, "jump": "jump" in self.events, "crouch": "s" in self.keys,
                "attack": "attack" in self.events, "cast": None, "parry": "parry" in self.events,
-               "special": None, "strike": None, "myth": False}
+               "special": None, "strike": None, "myth": False, "rult": "r" in self.events}
         if "a" in self.keys:
             inp["move"] -= 1
         if "d" in self.keys:
@@ -479,6 +519,16 @@ class Game(tk.Tk):
                 self.net_my_pick = None
                 self.net_foe_pick = None
                 self.set_state("net_select")
+            elif self.net_mode == "online" and self.net is None:
+                self.online_t += dt
+                if self.online_t >= 1.2:
+                    self.online_t = 0.0
+                    self.net_peers, self.net_sids = self.disc.scan("online")
+                    if self.net_peers and isinstance(self.net_host, netplay.Host):
+                        ip, name = self.net_peers[0]
+                        peer_sid = self.net_sids.get(ip, "")
+                        if peer_sid and (self.disc.sid < peer_sid or not self.net_host.alive):
+                            self.net_connect(ip, name)
             if self.disc is None:
                 self.net_back()
         elif self.state == "net_select":
@@ -582,12 +632,15 @@ class Game(tk.Tk):
         exp_gain = 0
         if a.net:
             exp_gain = 30 if a.win else 12
+            if a.win:
+                st["online_wins"] = st.get("online_wins", 0) + 1
             if a.fatality_done and a.win:
                 st["fatalities"] = st.get("fatalities", 0) + 1
             if a.fatality_gems:
                 self.earn_gems(a.fatality_gems)
             if a.reward:
                 self.earn(a.reward)
+            self._count_arena_stats(st, a)
             a.exp_gain = exp_gain
             self.add_exp(exp_gain)
             self.persist()
@@ -596,6 +649,13 @@ class Game(tk.Tk):
             waves = max(0, a.wave - 1)
             exp_gain = 10 * waves + max(0, waves - 3) * 5
             st["waves"] += waves
+        elif a.martyr:
+            exp_gain = 70 if a.win else max(10, int(a.dmg_dealt // 15))
+            if a.win:
+                st["martyr_wins"] = st.get("martyr_wins", 0) + 1
+                self.earn_gems(a.martyr_gems)
+                a.reward = 0
+            st["max_damage"] = max(st.get("max_damage", 0), int(a.dmg_dealt))
         elif a.win:
             exp_gain = 40 + 8 * a.level + (20 if a.boss else 0)
             st["wins"] += 1
@@ -614,12 +674,7 @@ class Game(tk.Tk):
         if a.fatality_gems:
             self.earn_gems(a.fatality_gems)
         a.exp_gain = exp_gain
-        st["specials"] += a.stats["specials"]
-        st["ults"] += a.stats["ults"]
-        st["parries"] += a.stats["parries"]
-        st["strikes"] += a.stats["strikes"]
-        st["injuries"] += a.stats["injuries"]
-        st["myth_ults"] += a.stats["myth_ults"]
+        self._count_arena_stats(st, a)
         st["max_combo"] = max(st["max_combo"], a.max_combo)
         if a.reward:
             self.earn(a.reward)
@@ -632,11 +687,12 @@ class Game(tk.Tk):
                 rec["stage"] = stage
                 r = campaign.CAMPAIGNS[idx]["reward"]
                 if r["type"] == "hero":
-                    hero = r["hero"]
-                    if hero not in self.owned:
-                        self.owned.append(hero)
-                    st["buys"] = st.get("buys", 0) + 1
-                    self.toasts.append(("ЭКСКЛЮЗИВ: %s!" % hero, "", time.time() + 5.0))
+                    if campaign.is_final(idx, stage) and not rec["done"]:
+                        hero = r["hero"]
+                        if hero not in self.owned:
+                            self.owned.append(hero)
+                        st["buys"] = st.get("buys", 0) + 1
+                        self.toasts.append(("ЭКСКЛЮЗИВ: %s!" % hero, "", time.time() + 5.0))
                 elif r["type"] == "gems":
                     gm = campaign.first_clear_gems(stage)
                     self.earn_gems(gm)
@@ -657,6 +713,12 @@ class Game(tk.Tk):
                           if campaign.camp_done(self.save, ci))
         self.add_exp(exp_gain)
         self.persist()
+
+    def _count_arena_stats(self, st, a):
+        for key in ("specials", "ults", "parries", "strikes", "injuries", "myth_ults",
+                    "casts", "bleeds", "chains", "saws", "roars", "aoes", "haze",
+                    "legend_ults"):
+            st[key] = st.get(key, 0) + a.stats.get(key, 0)
 
     def draw_level_bar(self, cv, x, y):
         need = exp_to_next(self.plvl)
@@ -688,12 +750,13 @@ class Game(tk.Tk):
         cv = self.cv
         cx = W // 2
         self.ui.button(cv, cx - 110, 300, cx + 110, 490, "PLAY", self.goto_mode, font=F_SQUARE)
-        self.ui.button(cv, cx - 160, 500, cx + 160, 556, "HEROES", self.goto_heroes, font=F_MID)
-        self.ui.button(cv, cx - 160, 560, cx + 160, 616, "FRIEND", self.goto_net, font=F_MID)
-        self.ui.button(cv, cx - 160, 620, cx + 160, 676, "CAMPAIGN", self.goto_campaigns, font=F_MID)
-        self.ui.button(cv, cx - 160, 680, cx + 160, 736, "SHOP", self.goto_shop, font=F_MID)
-        self.ui.button(cv, cx - 160, 740, cx + 160, 796, "INFO", self.goto_info, font=F_SMALL)
-        self.ui.button(cv, cx - 160, 800, cx + 160, 856, "AWARDS", self.goto_achievements, font=F_SMALL)
+        self.ui.button(cv, cx - 160, 500, cx + 160, 550, "HEROES", self.goto_heroes, font=F_MID)
+        self.ui.button(cv, cx - 160, 554, cx + 160, 604, "ONLINE", self.goto_online, font=F_MID)
+        self.ui.button(cv, cx - 160, 608, cx + 160, 658, "FRIEND", self.goto_net, font=F_MID)
+        self.ui.button(cv, cx - 160, 662, cx + 160, 712, "CAMPAIGN", self.goto_campaigns, font=F_MID)
+        self.ui.button(cv, cx - 160, 716, cx + 160, 766, "SHOP", self.goto_shop, font=F_MID)
+        self.ui.button(cv, cx - 160, 770, cx + 160, 820, "INFO", self.goto_info, font=F_SMALL)
+        self.ui.button(cv, cx - 160, 824, cx + 160, 874, "AWARDS", self.goto_achievements, font=F_SMALL)
         self.ui.coins(cv, 30, H - 40, self.coins)
         self.ui.gems(cv, 240, H - 40, self.gems)
         self.draw_level_bar(cv, 30, 24)
@@ -706,30 +769,35 @@ class Game(tk.Tk):
         cv = self.cv
         cv.create_text(W / 2 + 3, 153, text="ВЫБОР РЕЖИМА", font=F_BIG, fill="#2a0503", tags=("dyn",))
         cv.create_text(W / 2, 150, text="ВЫБОР РЕЖИМА", font=F_BIG, fill=COL_GOLD, tags=("dyn",))
-        self.ui.button(cv, W / 2 - 160, 240, W / 2 + 160, 340, "VS БОТ", self.goto_select, font=F_SQUARE)
-        self.ui.button(cv, W / 2 - 160, 360, W / 2 + 160, 440, "ВЫЖИВАНИЕ",
+        self.ui.button(cv, W / 2 - 160, 240, W / 2 + 160, 330, "VS БОТ", self.goto_select, font=F_SQUARE)
+        self.ui.button(cv, W / 2 - 160, 344, W / 2 + 160, 424, "ВЫЖИВАНИЕ",
                        lambda: self.goto_select("survival"), font=F_MID)
-        self.ui.button(cv, W / 2 - 160, 460, W / 2 + 160, 540, "CAMPAIGN",
+        self.ui.button(cv, W / 2 - 160, 438, W / 2 + 160, 518, "CAMPAIGN",
                        self.goto_campaigns, font=F_MID)
-        cv.create_text(W / 2, 590, text="БОТ: УРОВЕНЬ %d" % self.bot_level, fill=COL_ORANGE,
+        self.ui.button(cv, W / 2 - 160, 532, W / 2 + 160, 612, "МУЧЕНИК",
+                       lambda: self.goto_select("martyr"), font=F_MID)
+        cv.create_text(W / 2, 640, text="БОТ: УРОВЕНЬ %d" % self.bot_level, fill=COL_ORANGE,
                        font=F_MID, tags=("dyn",))
         if self.bot_level % 10 == 0:
-            cv.create_text(W / 2, 622, text="!! ВНИМАНИЕ: ЭТО БОСС !!", fill=COL_RED, font=F_MID, tags=("dyn",))
-        cv.create_text(W / 2, 654, text="ВЫЖИВАНИЕ: волны врагов · каждая 5-я — мини-босс",
+            cv.create_text(W / 2, 668, text="!! ВНИМАНИЕ: ЭТО БОСС !!", fill=COL_RED, font=F_MID, tags=("dyn",))
+        cv.create_text(W / 2, 694, text="ВЫЖИВАНИЕ: волны врагов · каждая 5-я — мини-босс · МУЧЕНИК: 3 раунда против гиганта",
                        fill=COL_SAND, font=F_TINY, tags=("dyn",))
-        cv.create_text(W / 2, 676, text="+35 монет за воина · +70 за мини-босса · бонус за волну",
-                       fill=COL_SAND, font=F_TINY, tags=("dyn",))
-        self.ui.coins(cv, W / 2 - 90, 700, self.coins)
-        self.ui.gems(cv, W / 2 + 60, 700, self.gems)
+        cv.create_text(W / 2, 716, text="МУЧЕНИК: победа = 100 самоцветов · поражение = монеты за нанесённый урон",
+                       fill=COL_GEM, font=F_TINY, tags=("dyn",))
+        self.ui.coins(cv, W / 2 - 90, 740, self.coins)
+        self.ui.gems(cv, W / 2 + 60, 740, self.gems)
         self.ui.button(cv, 24, 24, 150, 70, "НАЗАД", self.goto_menu, font=F_SMALL)
 
     def draw_net_scan(self):
         cv = self.cv
         cx = W // 2
-        cv.create_text(cx + 3, 93, text="FRIEND · LAN", font=F_BIG, fill="#2a0503", tags=("dyn",))
-        cv.create_text(cx, 90, text="FRIEND · LAN", font=F_BIG, fill=COL_GOLD, tags=("dyn",))
-        cv.create_text(cx, 136, text="БОЙ С ДРУГОМ ПО ЛОКАЛЬНОЙ СЕТИ · ПОЛНЫЙ БАЛАНС", fill=COL_ORANGE,
-                       font=F_SMALL, tags=("dyn",))
+        online = self.net_mode == "online"
+        title = "ONLINE · ПОИСК ИГРОКА" if online else "FRIEND · LAN"
+        sub = ("АВТОМАТИЧЕСКИЙ ПОИСК ПРОТИВНИКА · ПОЛНЫЙ БАЛАНС" if online
+               else "БОЙ С ДРУГОМ ПО ЛОКАЛЬНОЙ СЕТИ · ПОЛНЫЙ БАЛАНС")
+        cv.create_text(cx + 3, 93, text=title, font=F_BIG, fill="#2a0503", tags=("dyn",))
+        cv.create_text(cx, 90, text=title, font=F_BIG, fill=COL_GOLD, tags=("dyn",))
+        cv.create_text(cx, 136, text=sub, fill=COL_ORANGE, font=F_SMALL, tags=("dyn",))
         cv.create_text(cx, 162, text="Ваш компьютер: %s%s" % (netplay.host_name(),
                        "" if (self.disc and self.disc.hosting) else " · режим подключения"),
                        fill=COL_SAND, font=F_TINY, tags=("dyn",))
@@ -737,9 +805,17 @@ class Game(tk.Tk):
                             width=2, tags=("dyn",))
         cv.create_text(cx, 216, text="КОМПЬЮТЕРЫ В СЕТИ", fill=COL_ORANGE, font=F_MID, tags=("dyn",))
         if not self.net_peers:
-            cv.create_text(cx, 300, text="ПОКА НИКОГО НЕ НАЙДЕНО...", fill="#8a4a20", font=F_SMALL, tags=("dyn",))
-            cv.create_text(cx, 330, text="Друг должен запустить IMMY и открыть вкладку FRIEND", fill=COL_SAND,
-                           font=F_TINY, tags=("dyn",))
+            if online:
+                cv.create_text(cx, 300, text="ПОИСК ПРОТИВНИКА...", fill="#8a4a20", font=F_SMALL, tags=("dyn",))
+                cv.create_text(cx, 330, text="Противник должен открыть вкладку ONLINE — соединение произойдёт само",
+                               fill=COL_SAND, font=F_TINY, tags=("dyn",))
+            else:
+                cv.create_text(cx, 300, text="ПОКА НИКОГО НЕ НАЙДЕНО...", fill="#8a4a20", font=F_SMALL, tags=("dyn",))
+                cv.create_text(cx, 330, text="Друг должен запустить IMMY и открыть вкладку FRIEND", fill=COL_SAND,
+                               font=F_TINY, tags=("dyn",))
+        elif online:
+            cv.create_text(cx, 226, text="ПРОТИВНИК НАЙДЕН — СОЕДИНЯЕМ...", fill="#8aff8a", font=F_SMALL,
+                           tags=("dyn",))
         for i, (ip, name) in enumerate(self.net_peers[:10]):
             y0 = 250 + i * 44
             self.ui.button(cv, cx - 300, y0, cx + 300, y0 + 38, "%s · %s" % (name, ip),
@@ -751,7 +827,7 @@ class Game(tk.Tk):
 
     def net_refresh(self):
         if self.disc is not None:
-            self.net_peers = self.disc.scan()
+            self.net_peers, self.net_sids = self.disc.scan(self.net_mode)
             self.net_msg = ""
 
     def net_back(self):
@@ -890,33 +966,33 @@ class Game(tk.Tk):
         self.ui.coins(cv, W - 360, 50, self.coins)
         self.ui.gems(cv, W - 190, 50, self.gems)
         for i, c in enumerate(campaign.CAMPAIGNS):
-            col, row = i // 7, i % 7
-            x0 = 40 + col * 760
-            y0 = 130 + row * 104
-            x1, y1 = x0 + 720, y0 + 96
+            col, row = i % 3, i // 3
+            x0 = 24 + col * 520
+            y0 = 126 + row * 92
+            x1, y1 = x0 + 500, y0 + 86
             locked = not campaign.unlocked(i, self.save)
             prog = campaign.camp_progress(self.save, i)
             done = campaign.camp_done(self.save, i)
             cv.create_rectangle(x0, y0, x1, y1, fill="#1a0908",
                                 outline=c["color"] if not locked else "#3a1410", width=3, tags=("dyn",))
-            cv.create_text(x0 + 20, y0 + 28, text=c["name"], anchor="w", font=F_MID,
+            cv.create_text(x0 + 16, y0 + 24, text=c["name"], anchor="w", font=F_SMALL,
                            fill=c["color"] if not locked else "#6a3020", tags=("dyn",))
-            cv.create_text(x0 + 20, y0 + 54, text=c["desc"], anchor="w", fill=COL_SAND,
+            cv.create_text(x0 + 16, y0 + 46, text=c["desc"][:56], anchor="w", fill=COL_SAND,
                            font=F_TINY, tags=("dyn",))
-            cv.create_text(x0 + 20, y0 + 78, text=campaign.reward_label(c), anchor="w",
+            cv.create_text(x0 + 16, y0 + 68, text=campaign.reward_label(c), anchor="w",
                            fill=COL_GOLD, font=F_TINY, tags=("dyn",))
             if locked:
                 if i == 0:
-                    lock_txt = "ОТКРОЕТСЯ НА УРОВНЕ %d" % campaign.UNLOCK_PLVL
+                    lock_txt = "УРОВЕНЬ %d" % campaign.UNLOCK_PLVL
                 else:
-                    lock_txt = "ЗАВЕРШИТЕ ПРЕДЫДУЩУЮ КАМПАНИЮ"
-                cv.create_text(x1 - 20, y0 + 66, text=lock_txt, anchor="e", fill="#8a4a20",
+                    lock_txt = "ЗАВЕРШИТЕ ПРЕДЫДУЩУЮ"
+                cv.create_text(x1 - 16, y0 + 24, text=lock_txt, anchor="e", fill="#8a4a20",
                                font=F_TINY, tags=("dyn",))
             else:
-                cv.create_text(x1 - 20, y0 + 28, text="СТУПЕНЬ %d / %d%s" % (prog, c["stages"],
-                               " · ПРОЙДЕНА" if done else ""), anchor="e", fill=COL_ORANGE,
+                cv.create_text(x1 - 16, y0 + 24, text="%d/%d%s" % (prog, c["stages"],
+                               " ✓" if done else ""), anchor="e", fill=COL_ORANGE,
                                font=F_TINY, tags=("dyn",))
-                self.ui.button(cv, x1 - 150, y0 + 48, x1 - 20, y0 + 84, "ВОЙТИ",
+                self.ui.button(cv, x1 - 130, y0 + 44, x1 - 16, y0 + 78, "ВОЙТИ",
                                lambda idx=i: self.open_camp(idx), font=F_SMALL)
         self.ui.button(cv, 24, 24, 150, 70, "НАЗАД", self.goto_menu, font=F_SMALL)
 
@@ -1017,25 +1093,31 @@ class Game(tk.Tk):
             cv.create_text(W / 2, 136, text="УДАРЫ И КОМБО", font=F_MID, fill=COL_ORANGE, tags=("dyn",))
             lines = INFO_STRIKES
             step = 40
-        else:
+        elif self.info_page == 1:
             cv.create_text(W / 2, 136, text="МЕХАНИКИ ИГРЫ", font=F_MID, fill=COL_ORANGE, tags=("dyn",))
             lines = INFO_MECH
             step = 36
+        else:
+            cv.create_text(W / 2, 136, text="РЕЖИМЫ И РЕДКОСТИ", font=F_MID, fill=COL_ORANGE, tags=("dyn",))
+            lines = INFO_MODES
+            step = 40
         for i, (txt, colr) in enumerate(lines):
             cv.create_text(80, 180 + i * step, text=txt, anchor="w", font=F_SMALL,
                            fill=colr, tags=("dyn",))
         cv.create_text(W / 2, 812, text="Знание механик — половина победы. Тренируйся в режиме VS БОТ.",
                        fill=COL_GEM, font=F_TINY, tags=("dyn",))
-        if self.info_page == 0:
-            self.ui.button(cv, W / 2 + 180, 820, W / 2 + 300, 860, "МЕХАНИКИ >",
-                           lambda: self._info_page(1), font=F_SMALL)
-        else:
-            self.ui.button(cv, W / 2 - 300, 820, W / 2 - 180, 860, "< УДАРЫ",
+        if self.info_page > 0:
+            prev = ["< УДАРЫ", "< МЕХАНИКИ", "< МЕХАНИКИ"][self.info_page]
+            self.ui.button(cv, W / 2 - 300, 820, W / 2 - 180, 860, prev,
                            lambda: self._info_page(-1), font=F_SMALL)
+        if self.info_page < 2:
+            nxt = ["МЕХАНИКИ >", "РЕЖИМЫ >"][self.info_page]
+            self.ui.button(cv, W / 2 + 180, 820, W / 2 + 300, 860, nxt,
+                           lambda: self._info_page(1), font=F_SMALL)
         self.ui.button(cv, 24, 24, 150, 70, "НАЗАД", self.goto_menu, font=F_SMALL)
 
     def _info_page(self, d):
-        self.info_page = max(0, min(1, self.info_page + d))
+        self.info_page = max(0, min(2, self.info_page + d))
 
     def draw_heroes(self, select_mode):
         cv = self.cv
@@ -1219,11 +1301,11 @@ class Game(tk.Tk):
                             outline="#a1700a", width=2, tags=("dyn",))
         cv.create_text(cx, 620, text="ЦЕНА: %d САМОЦВЕТОВ" % CHEST_COST, fill=COL_GEM,
                        font=F_MID, tags=("dyn",))
-        cv.create_text(cx, 650, text="НЕОБЫЧНЫЙ 25% · ЭПИЧЕСКИЙ 18%", fill=COL_SAND,
+        cv.create_text(cx, 650, text="НЕОБЫЧНЫЙ 24% · ЭПИЧЕСКИЙ 16% · ЛЕГЕНДАРНЫЙ 7%", fill=COL_SAND,
                        font=F_TINY, tags=("dyn",))
-        cv.create_text(cx, 672, text="МИФИЧЕСКИЙ 10% · DEVILY 5%", fill=COL_SAND,
+        cv.create_text(cx, 672, text="МИФИЧЕСКИЙ 8% · DEVILY 5%", fill=COL_SAND,
                        font=F_TINY, tags=("dyn",))
-        cv.create_text(cx, 694, text="МОНЕТЫ 42% (150-500) · повтор героя: компенсация", fill=COL_SAND,
+        cv.create_text(cx, 694, text="МОНЕТЫ 40% (150-500) · повтор героя: компенсация", fill=COL_SAND,
                        font=F_TINY, tags=("dyn",))
         self.ui.button(cv, cx - 140, 720, cx + 140, 770, "ОТКРЫТЬ СУНДУК", self.buy_chest, font=F_SMALL)
 

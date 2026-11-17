@@ -3,8 +3,9 @@
 import math
 import random
 
-from .config import (COMBO_MULT, COMBO_WINDOW, CRIT_MULT, GROUND_Y, GRAVITY,
-                     KICK_CD, PARRY_CD, PARRY_WINDOW, UPPERCUT_CD, W, WALL)
+from .config import (COMBO_MULT, COMBO_WINDOW, CRIT_MULT, CURSE_MULT, GROUND_Y,
+                     GRAVITY, KICK_CD, PARRY_CD, PARRY_WINDOW, UPPERCUT_CD,
+                     ULT_CHARGE_MAX, W, WALL)
 from .heroes import HEROES
 from .util import clamp
 
@@ -52,7 +53,12 @@ class Fighter:
         self.dead_t = 0.0
         self.cds = [0.0] * len(self.h["abilities"])
         self.buffs = {"flash": 0.0, "rage": 0.0, "soul": 0.0,
-                      "guard": 0.0, "swift": 0.0, "vamp": 0.0}
+                      "guard": 0.0, "swift": 0.0, "vamp": 0.0,
+                      "curse": 0.0, "thorns": 0.0, "riposte": 0.0}
+        self.ult_charge = 0.0
+        self.bleed_t = 0.0
+        self.bleed_dps = 0.0
+        self.bleed_tick = 0.0
         self.vamp_pct = 0.0
         st = self.h["stats"]
         self.stat_dmg = 0.85 + st["str"] * 0.03
@@ -88,7 +94,10 @@ class Fighter:
         self.has_scythe = any(ab.get("kind") == "scythe" for ab in self.h["abilities"])
 
     def out_mult(self):
-        return self.dmg_mult * (self.rage_mult if self.buffs["rage"] > 0 else 1.0)
+        m = self.dmg_mult * (self.rage_mult if self.buffs["rage"] > 0 else 1.0)
+        if self.buffs["curse"] > 0:
+            m *= CURSE_MULT
+        return m
 
     def bbox(self):
         h = (self.H_CROUCH if (self.crouch and self.on_ground) else self.H_STAND) * self.scale
@@ -166,6 +175,7 @@ class Fighter:
     def gain_energy(self, dmg):
         if dmg > 0:
             self.energy = min(100.0, self.energy + 6.0 + dmg * 0.15)
+            self.ult_charge = min(ULT_CHARGE_MAX, self.ult_charge + 3.0 + dmg * 0.08)
 
     def eff_speed(self):
         m = self.speed_mult * self.stat_spd
@@ -186,6 +196,7 @@ class Fighter:
             return "guard"
         if self.buffs["flash"] > 0:
             dmg *= self.flash_mult
+        self.ult_charge = min(ULT_CHARGE_MAX, self.ult_charge + dmg * 0.05)
         self.hp = max(0.0, self.hp - dmg)
         self.hit_flash = 0.12
         self.hurt_t = 0.2
@@ -228,6 +239,16 @@ class Fighter:
                 game.parts.dmg_text(self.x, self.y - 150 * self.scale, n, "#7ad12a")
             if random.random() < dt * 8:
                 game.parts.rise(self.x, self.y - 60 * self.scale, "#7ad12a")
+        if self.bleed_t > 0:
+            self.bleed_t = max(0.0, self.bleed_t - dt)
+            self.bleed_tick += self.bleed_dps * dt
+            if self.bleed_tick >= 2.0:
+                n = int(self.bleed_tick)
+                self.bleed_tick -= n
+                self.hp = max(1.0, self.hp - n)
+                game.parts.dmg_text(self.x, self.y - 150 * self.scale, n, "#ff2a1a")
+            if random.random() < dt * 10:
+                game.parts.rise(self.x, self.y - 70 * self.scale, "#c41414")
         self.attack_cd = max(0.0, self.attack_cd - dt)
         self.attack_t = max(0.0, self.attack_t - dt)
         self.hurt_t = max(0.0, self.hurt_t - dt)

@@ -46,8 +46,11 @@ class BotAI:
         if frac <= 0.25 and game.myth_ready(f, foe):
             if game.try_myth_ult(f, foe):
                 return True
+        if frac <= 0.30 and game.legend_ready(f, foe):
+            if game.try_legend_ult(f, foe):
+                return True
         for i, ab in enumerate(f.h["abilities"]):
-            if ab["kind"] == "ult" and f.cds[i] <= 0 and frac < 0.10:
+            if ab["kind"] == "ult" and f.cds[i] <= 0 and f.ult_charge >= 100.0 and frac < 0.10:
                 dx = (foe.x - f.x) * f.facing
                 if 0 <= dx <= ab.get("range", 200) and game.cast_ability(f, i, foe):
                     return True
@@ -65,7 +68,8 @@ class BotAI:
     def pick_tactic(self, foe):
         kinds = {ab["kind"] for ab in self.f.h["abilities"]}
         has_range = bool(kinds & {"orb", "wave", "rain", "beam", "hand", "poison",
-                                  "tide", "geyser", "vortex", "scythe", "snare"})
+                                  "tide", "geyser", "vortex", "scythe", "snare",
+                                  "chains", "meteor", "shock", "drain"})
         frac = foe.hp / foe.max_hp if foe.max_hp else 1.0
         if frac < 0.25:
             self.tactic = "rush"

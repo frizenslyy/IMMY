@@ -5,7 +5,7 @@ import os
 TITLE = "IMMY"
 
 W, H = 1600, 900
-FPS = 90
+FPS = 110
 TICK_MS = 1000 // FPS
 GROUND_Y = 770
 WALL = 80
@@ -50,8 +50,19 @@ AIR_CD = 1.0
 
 INJURY_CHANCE = 0.04
 
-MYTH_ENERGY = 50
+MYTH_ENERGY = 100
 MYTH_FOE_HP = 0.25
+LEGEND_FOE_HP = 0.30
+ULT_CHARGE_MAX = 100.0
+THORNS_PCT = 0.30
+RIPOSTE_DUR = 0.9
+RIPOSTE_MULT = 1.3
+CURSE_MULT = 0.7
+MARTYR_ROUNDS = 3
+MARTYR_HP_MULT = 6.0
+MARTYR_DMG_MULT = 4.0
+MARTYR_GEMS = 100
+MARTYR_COIN_PER_DMG = 2
 
 MAX_PARTS = 220
 MAX_EMBERS = 26
@@ -70,7 +81,8 @@ ULT_RANGE_Y = 200
 FINISHER_BONUS = 25
 
 RARITY_POWER = {"standard": 1.0, "common": 1.0, "uncommon": 1.06,
-                "exclusive": 1.10, "epic": 1.13, "mythic": 1.20, "devil": 1.28}
+                "exclusive": 1.10, "epic": 1.13, "mythic": 1.20, "devil": 1.28,
+                "legendary": 1.35}
 
 FATALITY_WINDOW = 4.5
 FATALITY_BONUS = 150

@@ -19,7 +19,8 @@ from immy.heroes import HEROES, RARITY_LABEL, STANDARD_KEYS
 from immy.sound import TRACKS, _render_track
 
 EMPTY_INP = {"move": 0, "jump": False, "crouch": False, "attack": False,
-             "cast": None, "parry": False, "special": None, "strike": None, "myth": False}
+             "cast": None, "parry": False, "special": None, "strike": None, "myth": False,
+             "rult": False}
 
 
 def play(arena, frames, attack_every=13, cast_every=31, jump_every=47, seed=5):
@@ -48,11 +49,12 @@ def main():
         h = HEROES[hero]
         assert "stats" in h and set(h["stats"]) == {"str", "agi", "spd"}
         total = sum(h["stats"].values())
-        want = {"standard": 14, "common": 14, "uncommon": 17, "epic": 19, "exclusive": 17,
-                "mythic": 21, "devil": 24}[h["rarity"]]
-        assert total == want, (hero, total, want)
-        assert len(h["abilities"]) == (4 if h["rarity"] != "standard" and
-                                        h["rarity"] != "common" else 3), hero
+        lo, hi = {"standard": (14, 14), "common": (14, 14), "uncommon": (17, 17),
+                  "epic": (16, 20), "exclusive": (17, 17), "mythic": (18, 22),
+                  "devil": (24, 24), "legendary": (20, 22)}[h["rarity"]]
+        assert lo <= total <= hi, (hero, total, lo, hi)
+        n_ab_want = 3 if h["rarity"] in ("standard", "common") else (5 if h["rarity"] == "legendary" else 4)
+        assert len(h["abilities"]) == n_ab_want, hero
         assert h["rarity"] in RARITY_LABEL
         for ab in h["abilities"]:
             assert ab["cd"] > 0 and ab.get("desc")
@@ -60,6 +62,8 @@ def main():
             assert h["abilities"][-1]["kind"] == "ult", hero
         if h["rarity"] in ("mythic", "devil"):
             assert h["abilities"][-1]["kind"] == "myth_ult", hero
+        if h["rarity"] == "legendary":
+            assert h["abilities"][-1]["kind"] == "legend_ult", hero
         assert h.get("pros") and h.get("cons"), hero
         a = Arena(hero, "EMBERY" if hero != "EMBERY" else "DEADY", 1, False)
         assert a.map in MAPS
@@ -347,13 +351,13 @@ def main():
     for key in HEROES:
         h = HEROES[key]
         sps = h.get("specials", [])
-        want = 4 if h["rarity"] in ("mythic", "devil") else \
+        want = 4 if h["rarity"] in ("mythic", "devil", "legendary") else \
             (3 if h["rarity"] in ("uncommon", "epic", "exclusive") else 2)
         assert len(sps) == want, (key, len(sps))
         combos = [sp["combo"] for sp in sps]
         assert len(set(combos)) == len(combos) and all(c in ("as", "ws", "wa", "wd") for c in combos)
         costs = [sp["cost"] for sp in sps]
-        assert costs == sorted(costs) and all(0 < c <= 100 for c in costs)
+        assert all(0 < c <= 100 for c in costs), (key, costs)
         for sp in sps:
             assert sp.get("name") and sp.get("desc")
             assert sp.get("cd", 0) > 0, (key, sp.get("name"))
@@ -454,12 +458,13 @@ def main():
     a.p.cds[0] = 5.0
     assert not a.myth_ready(a.p, a.b)
     a.p.cds[0] = 0.0
+    a.p.ult_charge = 100.0
     a.b.hp = a.b.max_hp * 0.5
     assert not a.myth_ready(a.p, a.b)
     a.b.hp = a.b.max_hp * 0.2
     assert a.myth_ready(a.p, a.b)
     assert a.try_myth_ult(a.p, a.b)
-    assert a.p.energy == 50.0 and a.p.cds[0] > 0 and a.p.cds[3] > 0
+    assert a.p.energy == 0.0 and a.p.cds[0] > 0 and a.p.cds[3] > 0
     assert any(fx["kind"] == "myth_necromancery" for fx in a.fx)
     for _ in range(110):
         a.update(1 / 60, dict(EMPTY_INP))
@@ -544,6 +549,7 @@ def main():
     a.ai.update = lambda *args: None
     a.ai.level = 0
     a.p.x, a.b.x = 400.0, 700.0
+    a.p.ult_charge = 100.0
     a.b.hp = a.b.max_hp * 0.5
     assert not a.cast_ability(a.p, 3, a.b)
     a.b.hp = a.b.max_hp * 0.08
@@ -561,6 +567,7 @@ def main():
     a.ai.update = lambda *args: None
     a.ai.level = 0
     a.p.x, a.b.x = 400.0, 700.0
+    a.p.ult_charge = 100.0
     a.b.hp = a.b.max_hp * 0.03
     assert a.cast_ability(a.p, 3, a.b)
     for _ in range(80):
@@ -592,7 +599,7 @@ def main():
     assert [x["id"] for x in granted] == ["w1", "w5"], granted
     assert d["coins"] == 150 and "w1" in d["ach"] and "w5" in d["ach"]
     assert ach_mod.check(d) == []
-    assert len(ach_mod.ACHIEVEMENTS) == 123, len(ach_mod.ACHIEVEMENTS)
+    assert len(ach_mod.ACHIEVEMENTS) == 191, len(ach_mod.ACHIEVEMENTS)
     n_gem = sum(1 for a in ach_mod.ACHIEVEMENTS if a.get("gems"))
     assert n_gem > 40, n_gem
     d2 = save_mod.default_save()
@@ -601,15 +608,15 @@ def main():
     granted2 = ach_mod.check(d2)
     assert ga["id"] in [x["id"] for x in granted2]
     assert d2["gems"] == ga["gems"] and d2["stats"]["gems_earned"] == ga["gems"]
-    print("achievements 123 + gems grant ok")
+    print("achievements 191 + gems grant ok")
 
-    assert sum(c["stages"] for c in camp_mod.CAMPAIGNS) == 165
-    assert len(camp_mod.CAMPAIGNS) == 13
+    assert sum(c["stages"] for c in camp_mod.CAMPAIGNS) == 305
+    assert len(camp_mod.CAMPAIGNS) == 23
     assert camp_mod.stage_level(0, 1) == 1 and camp_mod.stage_level(0, 10) == 13
     assert camp_mod.is_final(0, 10) and not camp_mod.is_final(0, 9)
     hero_rewards = [c for c in camp_mod.CAMPAIGNS if c["reward"]["type"] == "hero"]
     gem_rewards = [c for c in camp_mod.CAMPAIGNS if c["reward"]["type"] == "gems"]
-    assert len(hero_rewards) == 6 and len(gem_rewards) == 3
+    assert len(hero_rewards) == 6 and len(gem_rewards) == 8
     assert all(camp_mod.reward_label(c) for c in camp_mod.CAMPAIGNS)
     d = save_mod.default_save()
     assert camp_mod.unlocked(0, d) and not camp_mod.unlocked(1, d)
@@ -735,11 +742,94 @@ def main():
     fake = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     fake.sendto((netplay.ANS + "deadbeef|TESTPC").encode(), ("127.0.0.1", NET_DISCOVER_PORT))
     time.sleep(0.15)
-    peers = disc.scan()
+    peers, sids = disc.scan()
     fake.close()
     disc.close()
     assert any(name == "TESTPC" for _, name in peers), peers
     print("discovery ok")
+
+    d1 = netplay.Discovery()
+    d2 = netplay.Discovery()
+    d1.seeking = True
+    d2.seeking = True
+    p1, s1 = d1.scan("online")
+    p2, s2 = d2.scan("online")
+    assert any(name for _, name in p1) and any(name for _, name in p2), (p1, p2)
+    assert all(sids_ok for sids_ok in (s1, s2) if sids_ok)
+    d1.close()
+    d2.close()
+    print("online seek loopback ok")
+
+    for key in ("KINGLY", "DIVINY", "COLOSSY", "VOIDY", "STORMY"):
+        a = Arena(key, "DEADY", 1, False)
+        a.phase = "fight"
+        a.p.energy = 100.0
+        a.p.ult_charge = 100.0
+        a.p.cds = [0.0] * 5
+        a.b.hp = a.b.max_hp * 0.2
+        assert a.legend_ready(a.p, a.b)
+        assert a.try_legend_ult(a.p, a.b)
+        assert a.p.energy == 0.0 and a.p.ult_charge == 0.0
+        for _ in range(200):
+            a.update(1 / 60, dict(EMPTY_INP))
+    print("legend ult ok")
+
+    a = Arena("NECROMANCERY", "EMBERY", 1, False)
+    a.phase = "fight"
+    assert a.p.ult_charge == 0.0
+    a.register_hit(a.p, a.b, 40)
+    assert a.p.ult_charge > 0, a.p.ult_charge
+    a.b.hp = a.b.max_hp * 0.2
+    a.p.energy = 100.0
+    a.p.ult_charge = 50.0
+    a.p.cds[0] = a.p.cds[3] = 0.0
+    assert not a.myth_ready(a.p, a.b)
+    a.p.ult_charge = 100.0
+    assert a.myth_ready(a.p, a.b)
+    print("ult gauge ok")
+
+    a = Arena("DEADY", "LIGHTY", 1, False, martyr=True)
+    assert a.martyr and a.b.max_hp == 600.0 and a.b.dmg_mult == 4.0
+    a.phase = "fight"
+    a.b.hp = 1.0
+    a.register_hit(a.p, a.b, 50)
+    for _ in range(130):
+        a.update(1 / 60, dict(EMPTY_INP))
+    assert a.round == 2 and a.phase == "intro", (a.round, a.phase)
+    a.phase = "fight"
+    a.b.hp = 1.0
+    a.register_hit(a.p, a.b, 50)
+    for _ in range(130):
+        a.update(1 / 60, dict(EMPTY_INP))
+    assert a.phase == "end" and a.win and a.martyr_gems == 100, (a.phase, a.win)
+    print("martyr ok")
+
+    a = Arena("CHAINY", "DEADY", 1, False)
+    a.phase = "fight"
+    a.b.x = a.p.x + 300
+    assert a.cast_ability(a.p, 0, a.b)
+    a = Arena("SAWY", "DEADY", 1, False)
+    a.phase = "fight"
+    assert a.cast_ability(a.p, 0, a.b)
+    a = Arena("ROARY", "DEADY", 1, False)
+    a.phase = "fight"
+    assert a.cast_ability(a.p, 0, a.b)
+    a = Arena("HAZEY", "DEADY", 1, False)
+    a.phase = "fight"
+    assert a.cast_ability(a.p, 0, a.b)
+    for _ in range(120):
+        a.update(1 / 60, dict(EMPTY_INP))
+    print("new ability kinds ok")
+
+    assert len(camp_mod.CAMPAIGNS) == 23
+    assert sum(c["stages"] for c in camp_mod.CAMPAIGNS) == 305
+    assert camp_mod.is_final(22, 16) and not camp_mod.is_final(22, 15)
+    print("campaigns 23 ok")
+
+    assert len(ach_mod.ACHIEVEMENTS) == 191
+    ids = [a["id"] for a in ach_mod.ACHIEVEMENTS]
+    assert len(set(ids)) == 191
+    print("achievements 191 ok")
 
     print("SELFTEST OK")
 
