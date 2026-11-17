@@ -1,10 +1,10 @@
-"""IMMY — карты арен (30 шт., часть с ловушками), фоны, иконки героев и портреты."""
+"""IMMY — карты арен (35 шт., часть с ловушками), фоны, иконки героев и портреты."""
 
 import math
 import random
 
 from .config import (COL_GOLD, COL_SAND, F_SMALL, F_TITLE, TRAP_ACTIVE, TRAP_CYCLE,
-                     GROUND_Y, H, MENU_STOPS, W)
+                     GROUND_Y, H, MENU_STOPS, TRAP_XS, CRUSHER_XS, RING_XS, W, WALL)
 from .heroes import HEROES
 from .util import gradient
 
@@ -109,6 +109,21 @@ MAPS = [
     _m("ВРАТА БЕЗДНЫ", (6, 2, 10), (30, 8, 44), (84, 24, 96), "#e04aff", "#a02ad1",
        "#140818", "#1e0c24", "#100614", "#c04aff", "#180a1e",
        ("#c04aff", "#e04aff", "#f0c0ff"), "#1c0a24", "#120618", True, "stars", "flame"),
+    _m("ЛАВОВЫЕ ЖИЛЫ", (14, 2, 6), (110, 20, 8), (236, 90, 20), "#ff8c1a", "#ff5a1a",
+       "#1c0806", "#2a0e08", "#220c08", "#ff6a1a", "#30100a",
+       ("#ff5a1a", "#ff8c1a", "#ffd23f"), "#3a0e08", "#260a06", False, "embers", "geyser"),
+    _m("КЛЕТКА ЯРОСТИ", (12, 4, 4), (70, 20, 14), (160, 50, 22), "#ffd23f", "#ff8c1a",
+       "#180a08", "#241010", "#180a08", "#ff9a4a", "#24100c",
+       ("#ff6a1a", "#ffb01a", "#ffd23f"), "#2a0c08", "#1a0806", False, "dust", "claws"),
+    _m("СТЕКЛЯННЫЙ ШПИЛЬ", (6, 10, 20), (24, 44, 80), (100, 140, 200), "#e8f4ff", "#a8ccff",
+       "#0e1e34", "#16304e", "#0c1a2c", "#9ad4ff", "#122440",
+       ("#8ac8ff", "#c0f0ff", "#ffffff"), "#0e2038", "#0a1626", True, "stars", "tesla"),
+    _m("ЖЕРНОВА", (10, 8, 8), (48, 44, 46), (110, 100, 96), "#e8d8b0", "#c8b488",
+       "#141212", "#1e1c1c", "#121010", "#c0b0a0", "#1a1816",
+       ("#ff8c1a", "#e8a83a", "#ffd23f"), "#201c1a", "#161412", False, "dust", "crusher"),
+    _m("КОЛЬЦО ВУЛКАНА", (12, 2, 10), (60, 10, 30), (170, 40, 40), "#ffcf6a", "#ff5a1a",
+       "#180610", "#241018", "#14060c", "#ff5a1a", "#1e0a10",
+       ("#ff4a6a", "#ff8c1a", "#ffd23f"), "#200810", "#14040a", True, "embers", "ring"),
 ]
 
 
@@ -255,6 +270,33 @@ def draw_trap_static(cv, m):
             fx = 260 + i * 340
             cv.create_rectangle(fx - 26, GROUND_Y - 4, fx + 26, GROUND_Y + 8,
                                 fill="#1c0a06", outline="#3a140a", tags=("bg",))
+    elif trap == "geyser":
+        for i in range(4):
+            gx = TRAP_XS[i]
+            cv.create_rectangle(gx - 24, GROUND_Y - 4, gx + 24, GROUND_Y + 8,
+                                fill="#1a0806", outline="#381208", tags=("bg",))
+            for sgn in (-1, 1):
+                cv.create_polygon(gx + sgn * 24, GROUND_Y, gx + sgn * 34, GROUND_Y - 10,
+                                  gx + sgn * 8, GROUND_Y - 4, fill="#40180c", outline="", tags=("bg",))
+    elif trap == "claws":
+        for k in range(4):
+            cx = TRAP_XS[k]
+            cv.create_rectangle(cx - 14, 0, cx + 14, 12, fill="#241c14", outline="#3a2e20", tags=("bg",))
+    elif trap == "tesla":
+        for k in range(4):
+            px = TRAP_XS[k]
+            cv.create_rectangle(px - 16, GROUND_Y - 22, px + 16, GROUND_Y + 8,
+                                fill="#181e28", outline="#28323e", tags=("bg",))
+    elif trap == "crusher":
+        cv.create_rectangle(WALL, 0, W - WALL, 10, fill="#241c14", outline="#3a2e20", tags=("bg",))
+        for cx in CRUSHER_XS:
+            cv.create_rectangle(cx - 40, 10, cx + 40, 22, fill="#3a2e20", outline="#4e4034", tags=("bg",))
+    elif trap == "ring":
+        for bx in (WALL + 40, W - WALL - 40):
+            cv.create_rectangle(bx - 16, GROUND_Y - 26, bx + 16, GROUND_Y + 6,
+                                fill="#241410", outline="#3a2018", tags=("bg",))
+            cv.create_oval(bx - 10, GROUND_Y - 34, bx + 10, GROUND_Y - 22,
+                           fill="#5a1c10", outline="", tags=("bg",))
 
 
 def draw_traps(cv, time_now, m):
@@ -292,6 +334,83 @@ def draw_traps(cv, time_now, m):
                 for k, (c, wdt) in enumerate((("#ff5a1a", 22), ("#ff8c1a", 14), ("#ffd23f", 7))):
                     cv.create_polygon(fx - wdt, GROUND_Y, fx + wdt, GROUND_Y,
                                       fx, GROUND_Y - hgt + k * 12, fill=c, outline="", tags=("dyn",))
+
+    elif trap == "geyser":
+        for i in range(4):
+            gx = TRAP_XS[i]
+            if active and (i + int(time_now / TRAP_CYCLE)) % 2 == 0:
+                hgt = 100 + 26 * math.sin(time_now * 10 + i * 1.7)
+                for k, (c, wdt) in enumerate((("#c03010", 18), ("#ff7a1a", 12), ("#ffd23f", 6))):
+                    cv.create_polygon(gx - wdt, GROUND_Y, gx + wdt, GROUND_Y,
+                                      gx, GROUND_Y - hgt + k * 10, fill=c, outline="", tags=("dyn",))
+            else:
+                r = 5 + 3 * math.sin(time_now * 5 + i)
+                cv.create_oval(gx - r, GROUND_Y - 8 - r, gx + r, GROUND_Y - 4 + r,
+                               fill="#701808", outline="", tags=("dyn",))
+    elif trap == "claws":
+        idx = int(time_now / TRAP_CYCLE) % 4
+        for k in range(4):
+            cx = TRAP_XS[k]
+            dep = 0.0
+            if active and k == idx:
+                pr = (time_now % TRAP_ACTIVE) / TRAP_ACTIVE
+                dep = (GROUND_Y - 200) * pr * pr
+            tip = 120 + dep
+            drops = dep > 0
+            cv.create_line(cx, 0, cx, tip - 40, fill="#4a4038", width=2, tags=("dyn",))
+            cv.create_rectangle(cx - 10, tip - 40, cx + 10, tip - 8, fill="#808894" if drops else "#4e545e",
+                                outline="#c8d0dc" if drops else "", tags=("dyn",))
+            cv.create_polygon(cx - 16, tip - 8, cx + 16, tip - 8, cx, tip,
+                              fill="#c8d0dc" if drops else "#6a707a", outline="", tags=("dyn",))
+            if drops:
+                for sgn in (-1, 1):
+                    cv.create_polygon(cx + sgn * 10, tip - 30, cx + sgn * 22, tip - 18, cx + sgn * 6, tip - 14,
+                                      fill="#9aa4b2", outline="", tags=("dyn",))
+    elif trap == "tesla":
+        idx = int(time_now / TRAP_CYCLE) % 4
+        for k in range(4):
+            px = TRAP_XS[k]
+            charged = active and k == idx
+            cv.create_line(px, GROUND_Y - 240, px, GROUND_Y - 20, fill="#303c4c", width=3, tags=("dyn",))
+            coil = "#9ad4ff" if charged else "#3a4a5e"
+            for yy in range(4):
+                cy = GROUND_Y - 60 - yy * 52
+                cv.create_oval(px - 10, cy - 8, px + 10, cy + 8, fill="#242e3a", outline=coil, tags=("dyn",))
+            if charged:
+                for arc in range(3):
+                    pts = [(px, GROUND_Y - 30 - arc * 70)]
+                    oy = pts[0][1]
+                    for st in range(4):
+                        sx = px + (20 if st % 2 else -20)
+                        oy -= 16
+                        pts += [(sx, oy), (px, oy - 6)]
+                    cv.create_line(*pts, fill="#c0e8ff", width=2, tags=("dyn",))
+    elif trap == "crusher":
+        for j, cx in enumerate(CRUSHER_XS):
+            pr = 0.0
+            if active and (j + int(time_now / TRAP_CYCLE)) % 2 == 0:
+                pr = (time_now % TRAP_ACTIVE) / TRAP_ACTIVE
+            head_y = 170 + (GROUND_Y - 190) * pr * pr
+            for ch in (cx - 26, cx + 26):
+                cv.create_line(ch, 0, ch, head_y - 12, fill="#4a4038", width=3, tags=("dyn",))
+            cv.create_rectangle(cx - 34, head_y - 26, cx + 34, head_y - 6, fill="#8a5a2a" if pr else "#5a4430",
+                                outline="#c8a050" if pr else "", tags=("dyn",))
+            for k in range(5):
+                sx = cx - 30 + k * 15
+                cv.create_polygon(sx, head_y - 6, sx + 11, head_y - 6, sx + 5, head_y + 8,
+                                  fill="#c8d0dc" if pr else "#7a746a", outline="", tags=("dyn",))
+    elif trap == "ring":
+        for j in range(2):
+            rx = W / 2 + (260 if j == 0 else -260) * math.sin(time_now * 0.9 + j * math.pi)
+            hot = active and (j + int(time_now / TRAP_CYCLE)) % 2 == 0
+            ry = GROUND_Y - 90
+            if hot:
+                for k, (c, wdt, hgt) in enumerate((("#8a1006", 16, 120), ("#ff5a1a", 10, 116), ("#ffd23f", 5, 110))):
+                    w2 = 6 * math.sin(time_now * 8 + k + j * 2)
+                    cv.create_oval(rx - wdt - w2, ry - hgt / 2, rx + wdt + w2, ry + hgt / 2,
+                                   outline=c, width=3, tags=("dyn",))
+            else:
+                cv.create_oval(rx - 12, ry - 52, rx + 12, ry - 28, fill="#3a1006", outline="", tags=("dyn",))
 
 
 def draw_ambient(cv, t, m):

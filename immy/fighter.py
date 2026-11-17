@@ -4,7 +4,7 @@ import math
 import random
 
 from .config import (COMBO_MULT, COMBO_WINDOW, CRIT_MULT, CURSE_MULT, GROUND_Y,
-                     GRAVITY, KICK_CD, PARRY_CD, PARRY_WINDOW, UPPERCUT_CD,
+                     GRAVITY, KICK_CD, PARRY_CD, PARRY_PERFECT, PARRY_WINDOW, UPPERCUT_CD,
                      ULT_CHARGE_MAX, W, WALL, ZONE_LEGS_SLOW)
 from .heroes import HEROES
 from .util import clamp
@@ -68,6 +68,8 @@ class Fighter:
         self.parry_t = 0.0
         self.parry_cd = 0.0
         self.parry_flash = 0.0
+        self.parry_perfect = False
+        self.force_crit_hits = 0
         self.root_t = 0.0
         self.energy = 0.0
         self.special_cd = 0.0
@@ -209,6 +211,7 @@ class Fighter:
         if self.dead or self.buffs["soul"] > 0:
             return "miss"
         if self.parry_t > 0:
+            self.parry_perfect = self.parry_t >= self.parry_window - PARRY_PERFECT
             self.parry_t = 0.0
             self.parry_flash = 0.3
             return "parry"

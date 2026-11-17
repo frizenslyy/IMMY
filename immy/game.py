@@ -2,14 +2,15 @@
 
 import math
 import random
+import traceback
 import time
 import tkinter as tk
 
 from . import achievements, artifacts, campaign, chests, netplay
 from .arena import Arena
-from .artifacts import (ARTIFACTS, ART_BY_ID, BUFF_LABEL, NATURE_BY_STYLE, NATURE_COLOR,
-                        NATURE_LABEL, NATURES, artifact_buffs, can_craft, craft_cost_label,
-                        hero_nature)
+from .artifacts import (ARTIFACTS, ART_BY_ID, BPS_LABEL, BUFF_LABEL, NATURE_BY_STYLE,
+                        NATURE_COLOR, NATURE_LABEL, NATURES, artifact_buffs, can_craft,
+                        craft_cost_label, hero_nature)
 from .background import (MAPS, draw_ambient, draw_fight_bg, draw_hero_icon,
                          draw_menu_bg, draw_screen_bg, draw_torches, draw_trap_static,
                          draw_traps)
@@ -30,6 +31,8 @@ CYR_CHAR = {"ц": "w", "ф": "a", "ы": "s", "в": "d", "а": "f", "у": "e"}
 CYR_NAME = {"tse": "w", "ef": "a", "yeru": "s", "ve": "d", "a": "f", "u": "e"}
 VK_MAP = {87: "w", 65: "a", 83: "s", 68: "d", 70: "f", 69: "e", 82: "r"}
 ARROWS = {"left": "a", "right": "d", "up": "w", "down": "s"}
+
+CAMP_BP_CHANCE = 0.45
 
 INFO_STRIKES = [
     ("КОМБО: 3 удара подряд усиливаются (x1.0 / x1.18 / x1.4), окно 0.9с", COL_ORANGE),
@@ -128,6 +131,7 @@ class Game(tk.Tk):
         except Exception:
             pass
         self.save = load_save()
+        self.apply_fullscreen()
         self.coins = self.save["coins"]
         self.gems = self.save["gems"]
         self.bot_level = self.save["bot_level"]
@@ -152,6 +156,7 @@ class Game(tk.Tk):
         self.shop_msg = None
         self.shop_tab = "heroes"
         self.art_page = 0
+        self.camp_page = 0
         self.shop_hero_page = 0
         self.net_hero_page = 0
         self.chest_kind = "chaos"
@@ -215,6 +220,8 @@ class Game(tk.Tk):
         self.save["exp"] = self.exp
         self.save["plvl"] = self.plvl
         self.save["stats"]["plvl"] = self.plvl
+        self.save["stats"]["arts_owned"] = len(self.save.get("arts", {}))
+        self.save["stats"]["bps_have"] = sum(self.save.get("bps", {}).values())
         granted = achievements.check(self.save)
         for a in granted:
             rw = ""
@@ -470,7 +477,11 @@ class Game(tk.Tk):
             if self.arena.phase == "end":
                 for x0, y0, x1, y1, action in self.buttons:
                     if x0 <= e.x <= x1 and y0 <= e.y <= y1:
-                        action()
+                        try:
+                            action()
+                        except Exception:
+                            traceback.print_exc()
+                            self.toasts.append(("ОШИБКА ДЕЙСТВИЯ", "", time.time() + 3.0))
                         return
             elif self.arena.phase == "fatality":
                 self.events.add("attack")
@@ -480,7 +491,11 @@ class Game(tk.Tk):
         for x0, y0, x1, y1, action in self.buttons:
             if x0 <= e.x <= x1 and y0 <= e.y <= y1:
                 self.sfx.play("click")
-                action()
+                try:
+                    action()
+                except Exception:
+                    traceback.print_exc()
+                    self.toasts.append(("ОШИБКА ДЕЙСТВИЯ", "", time.time() + 3.0))
                 return
 
     def build_input(self):
@@ -531,7 +546,10 @@ class Game(tk.Tk):
         now = time.time()
         dt = min(0.05, now - self.last)
         self.last = now
-        self.loop_body(dt)
+        try:
+            self.loop_body(dt)
+        except Exception:
+            traceback.print_exc()
         self.after(TICK_MS, self.loop)
 
     def loop_body(self, dt):
@@ -729,6 +747,10 @@ class Game(tk.Tk):
                 self.earn(bonus)
                 a.reward += bonus
                 st["camp_stages"] += 1
+            aid_bp = self.drop_blueprint(stage)
+            if aid_bp:
+                self.toasts.append(("РИСУНОК: " + artifacts.ART_BY_ID[aid_bp]["name"],
+                                    "", time.time() + 5.0))
                 if campaign.is_final(idx, stage) and not rec["done"]:
                     rec["done"] = True
                     self.toasts.append(("КАМПАНИЯ ЗАВЕРШЕНА!", "", time.time() + 5.0))
@@ -762,6 +784,19 @@ class Game(tk.Tk):
                 self.toasts.append(("ФРАГМЕНТ: " + artifacts.NATURE_LABEL[nat], "",
                                     time.time() + 4.0))
         return gains
+
+    def drop_blueprint(self, stage):
+        if stage < 3 or random.random() > CAMP_BP_CHANCE:
+            return None
+        bps = self.save.setdefault("bps", {})
+        pool = [a["id"] for a in artifacts.ARTIFACTS if a.get("bps")
+                and a["id"] not in self.save["arts"]
+                and bps.get(a["id"], 0) < a["bps"]]
+        if not pool:
+            return None
+        aid = random.choice(pool)
+        bps[aid] = bps.get(aid, 0) + 1
+        return aid
 
     def camp_next(self):
         if not self.camp_ctx or not self.arena.win:
@@ -855,7 +890,7 @@ class Game(tk.Tk):
                            lambda k=key: self._set_vol(k, 0.1), font=F_MID)
             self.buttons.append((bx0, y, bx1, y + 40,
                                  lambda k=key, bx0=bx0, bx1=bx1: self._bar_vol(k, bx0, bx1)))
-        toggles = (("БЕСШУМНЫЙ РЕЖИМ", "mute"), ("ТРЯСКА ЭКРАНА", "shake"), ("КРОВЬ", "blood"))
+        toggles = (("БЕСШУМНЫЙ РЕЖИМ", "mute"), ("ТРЯСКА ЭКРАНА", "shake"), ("КРОВЬ", "blood"), ("ПОЛНЫЙ ЭКРАН", "fullscreen"))
         for i, (label, key) in enumerate(toggles):
             y = 470 + i * 76
             on = bool(s[key])
@@ -863,8 +898,6 @@ class Game(tk.Tk):
             self.ui.button(cv, W / 2 - 60, y, W / 2 + 140, y + 44,
                            "ВКЛ" if on else "ВЫКЛ",
                            lambda k=key: self._toggle_set(k), font=F_SMALL)
-        cv.create_text(W / 2, 730, text="M — вкл/выкл музыку в любой момент", fill=COL_SAND,
-                       font=F_TINY, tags=("dyn",))
         self.ui.button(cv, 24, 24, 150, 70, "НАЗАД", self.goto_menu, font=F_SMALL)
 
     def _set_vol(self, key, d):
@@ -882,8 +915,16 @@ class Game(tk.Tk):
     def _toggle_set(self, key):
         s = self.save["settings"]
         s[key] = not s[key]
+        if key == "fullscreen":
+            self.apply_fullscreen()
         self.audio.apply(s)
         self.persist()
+
+    def apply_fullscreen(self):
+        try:
+            self.attributes("-fullscreen", bool(self.save["settings"].get("fullscreen")))
+        except Exception:
+            pass
 
     def draw_mode(self):
         cv = self.cv
@@ -1103,8 +1144,15 @@ class Game(tk.Tk):
         cv.create_text(W / 2, 90, text="CAMPAIGN", font=F_BIG, fill=COL_GOLD, tags=("dyn",))
         self.ui.coins(cv, W - 360, 50, self.coins)
         self.ui.gems(cv, W - 190, 50, self.gems)
-        for i, c in enumerate(campaign.CAMPAIGNS):
-            col, row = i % 3, i // 3
+        per = 18
+        pages = (len(campaign.CAMPAIGNS) + per - 1) // per
+        page = max(0, min(self.camp_page, pages - 1))
+        self.camp_page = page
+        for j, i in enumerate(range(page * per, (page + 1) * per)):
+            if i >= len(campaign.CAMPAIGNS):
+                break
+            c = campaign.CAMPAIGNS[i]
+            col, row = j % 3, j // 3
             x0 = 24 + col * 520
             y0 = 126 + row * 92
             x1, y1 = x0 + 500, y0 + 86
@@ -1132,7 +1180,19 @@ class Game(tk.Tk):
                                font=F_TINY, tags=("dyn",))
                 self.ui.button(cv, x1 - 130, y0 + 44, x1 - 16, y0 + 78, "ВОЙТИ",
                                lambda idx=i: self.open_camp(idx), font=F_SMALL)
+        cv.create_text(W / 2, 852, text="СТРАНИЦА %d / %d" % (page + 1, pages),
+                       fill=COL_SAND, font=F_SMALL, tags=("dyn",))
+        if page > 0:
+            self.ui.button(cv, W / 2 - 260, 836, W / 2 - 180, 872, "<",
+                           lambda: self._camp_page(-1), font=F_SMALL)
+        if page < pages - 1:
+            self.ui.button(cv, W / 2 + 180, 836, W / 2 + 260, 872, ">",
+                           lambda: self._camp_page(1), font=F_SMALL)
         self.ui.button(cv, 24, 24, 150, 70, "НАЗАД", self.goto_menu, font=F_SMALL)
+
+    def _camp_page(self, d):
+        pages = (len(campaign.CAMPAIGNS) + 17) // 18
+        self.camp_page = max(0, min(pages - 1, self.camp_page + d))
 
     def draw_camp_stages(self):
         cv = self.cv
@@ -1322,40 +1382,47 @@ class Game(tk.Tk):
                 tag, tcol = " · ЛЕГ-УЛЬТА (R)", "#ffc400"
             else:
                 tag, tcol = "", COL_GOLD
+            if y > 596:
+                cv.create_text(1170, y, text="См. INFO — остальные способности", anchor="w",
+                               fill="#7a4030", font=F_TINY, tags=("dyn",))
+                y = 614
+                break
             cv.create_text(1170, y, text="[%d] %s%s" % (i + 1, ab["name"], tag), anchor="w",
                            fill=tcol, font=F_SMALL, tags=("dyn",))
             cv.create_text(1560, y, text="%dс" % ab["cd"], anchor="e", fill="#ff5a1a", font=F_SMALL, tags=("dyn",))
+            nlines = max(1, -(-len(ab["desc"]) // 34))
             cv.create_text(1176, y + 15, text=ab["desc"], anchor="w", fill=COL_SAND, font=F_TINY,
                            width=374, tags=("dyn",))
-            y += 17 + max(1, -(-len(ab["desc"]) // 46)) * 13 + 8
+            y += 17 + nlines * 13 + 6
         sps = hero.get("specials", ())
-        if sps and y < 620:
+        if sps and y < 560:
             cv.create_text(1170, y + 2, text="СПЕЦПРИЁМЫ", anchor="w",
                            fill=COL_ORANGE, font=F_SMALL, tags=("dyn",))
-            cv.create_text(1560, y + 2, text="энергия · кд",
-                           anchor="e", fill="#8a4a20", font=F_TINY, tags=("dyn",))
-            for sp in sps:
-                y += 20
-                cv.create_text(1170, y, text="[%s] %s" % (sp["combo"], sp["name"]), anchor="w",
+            y += 22
+            half = (len(sps) + 1) // 2
+            for j, sp in enumerate(sps):
+                col_x = 1170 if j < half else 1372
+                row_y = y + (j if j < half else j - half) * 20
+                cv.create_text(col_x, row_y, text="[%s] %s" % (sp["combo"], sp["name"][:14]), anchor="w",
                                fill="#ffd24a", font=F_SMALL, tags=("dyn",))
-                cv.create_text(1560, y, text="%d · %dс" % (sp["cost"], sp.get("cd", 8)), anchor="e",
+                cv.create_text(col_x + 182, row_y, text="%dэ" % sp["cost"], anchor="e",
                                fill="#ff5a1a", font=F_SMALL, tags=("dyn",))
+            y += half * 20 + 4
         pros = hero.get("pros", ())
         cons = hero.get("cons", ())
-        pc_h = 22 + len(pros) * 18 + 18 + len(cons) * 18
-        if pros and cons and y + pc_h < 680:
-            y += 22
+        pc_h = 18 + len(pros) * 16 + 16 + len(cons) * 16
+        if pros and cons and y + pc_h < 682:
             if pros:
                 cv.create_text(1170, y, text="ПЛЮСЫ", anchor="w", fill="#8aff8a", font=F_TINY, tags=("dyn",))
-                for p in pros:
-                    y += 18
-                    cv.create_text(1180, y, text="+ " + p, anchor="w", fill="#8aff8a", font=F_TINY, tags=("dyn",))
+                for pr in pros:
+                    y += 16
+                    cv.create_text(1180, y, text="+ " + pr, anchor="w", fill="#8aff8a", font=F_TINY, tags=("dyn",))
             if cons:
-                y += 18
+                y += 16
                 cv.create_text(1170, y, text="МИНУСЫ", anchor="w", fill="#ff5a1a", font=F_TINY, tags=("dyn",))
-                for c in cons:
-                    y += 18
-                    cv.create_text(1180, y, text="- " + c, anchor="w", fill="#ff5a1a", font=F_TINY, tags=("dyn",))
+                for cn in cons:
+                    y += 16
+                    cv.create_text(1180, y, text="- " + cn, anchor="w", fill="#ff5a1a", font=F_TINY, tags=("dyn",))
 
         self.draw_artifact_equip(cv, sel)
         self.ui.button(cv, 24, 24, 150, 70, "НАЗАД", self.goto_menu, font=F_SMALL)
@@ -1403,6 +1470,7 @@ class Game(tk.Tk):
                                font=F_TINY, tags=("dyn",))
                 self.buttons.append((x0, 704, x1, 740, lambda k=hero_key, a=aid: self.toggle_art(k, a)))
         owned = self.save["arts"]
+        bps = self.save.get("bps", {})
         if not owned:
             cv.create_text(1170, 762, text="Нет артефактов — крафт в SHOP", anchor="w",
                            fill="#7a4030", font=F_TINY, tags=("dyn",))
@@ -1483,6 +1551,10 @@ class Game(tk.Tk):
             cv.create_text(fx + 32, 176, text=NATURE_LABEL[nat], anchor="w", fill=col,
                            font=F_TINY, tags=("dyn",))
             fx += 118
+        bps = self.save.get("bps", {})
+        cv.create_rectangle(fx, 162, fx + 26, 190, fill="#160607", outline=COL_GOLD, width=2, tags=("dyn",))
+        cv.create_text(fx + 13, 176, text=str(sum(bps.values())), fill=COL_GOLD, font=F_TINY, tags=("dyn",))
+        cv.create_text(fx + 32, 176, text=BPS_LABEL, anchor="w", fill=COL_GOLD, font=F_TINY, tags=("dyn",))
         chunk = ARTIFACTS[page * per:(page + 1) * per]
         for i, art in enumerate(chunk):
             col, row = i % cols, i // cols
@@ -1491,7 +1563,7 @@ class Game(tk.Tk):
             x1, y1 = x0 + 730, y0 + 94
             have = art["id"] in owned
             ncol = NATURE_COLOR[art["nature"]]
-            ok = can_craft(art, frags, self.gems)
+            ok = can_craft(art, frags, self.gems, bps)
             cv.create_rectangle(x0, y0, x1, y1, fill="#1a0908" if have else "#160607",
                                 outline=ncol if have else (COL_GOLD if ok else "#3a1410"),
                                 width=3 if have else 2, tags=("dyn",))
@@ -1502,7 +1574,7 @@ class Game(tk.Tk):
             buffs = " ".join("%s %s%d%%" % (BUFF_LABEL[k], "" if v >= 0 else "-", round(abs(v) * 100))
                              for k, v in art["buff"].items())
             cv.create_text(x0 + 14, y0 + 44, text=buffs, anchor="w", fill=COL_GOLD, font=F_TINY, tags=("dyn",))
-            cv.create_text(x0 + 14, y0 + 66, text=craft_cost_label(art), anchor="w",
+            cv.create_text(x0 + 14, y0 + 66, text=craft_cost_label(art, bps), anchor="w",
                            fill=COL_GEM if ok else "#8a4a20", font=F_TINY, tags=("dyn",))
             cv.create_text(x0 + 14, y0 + 84, text=art["desc"], anchor="w", fill="#7a5040",
                            font=F_TINY, tags=("dyn",))
@@ -1532,11 +1604,14 @@ class Game(tk.Tk):
         if art is None or aid in self.save["arts"]:
             return
         frags = self.save["frags"]
-        if not can_craft(art, frags, self.gems):
+        bps = self.save.setdefault("bps", {})
+        if not can_craft(art, frags, self.gems, bps):
             self.shop_msg = ("НЕ ХВАТАЕТ РЕСУРСОВ", time.time() + 2.0)
             return
         for nat, n in art["cost"].items():
             frags[nat] = frags.get(nat, 0) - n
+        if art.get("bps"):
+            bps[art["id"]] = bps.get(art["id"], 0) - art["bps"]
         self.gems -= art["gems"]
         self.save["gems"] = self.gems
         self.save["arts"].append(aid)

@@ -1,58 +1,59 @@
 @echo off
+chcp 65001 >nul
 setlocal enabledelayedexpansion
-title IMMY - sborka exe
+title IMMY - сборка exe
 cd /d "%~dp0"
 
 echo ============================================
-echo   IMMY - sborka igry v exe
+echo   IMMY v8.0 - сборка игры в exe
 echo ============================================
 echo.
 
 where git >nul 2>nul
 if %errorlevel%==0 (
-    echo [1/3] Proverka obnovleniy repozitoriya...
+    echo [1/3] Проверка обновлений репозитория...
     git fetch origin
     for /f "delims=" %%b in ('git rev-parse --abbrev-ref HEAD') do set "BRANCH=%%b"
     git pull --ff-only origin !BRANCH!
     if errorlevel 1 (
-        echo [!] Ne udalos obnovit repozitoriy - sobirayu tekushchie faily.
+        echo [!] Не удалось обновить репозиторий - собираю текущие файлы.
     ) else (
-        echo [+] Repozitoriy obnovlen.
+        echo [+] Репозиторий обновлён.
     )
 ) else (
-    echo [1/3] git ne nayden - propuskayu proverku obnovleniy.
+    echo [1/3] git не найден - пропускаю проверку обновлений.
 )
 echo.
 
 where python >nul 2>nul
 if errorlevel 1 (
-    echo [!] Python ne nayden. Ustanovi Python 3.10+ i dobav' v PATH.
+    echo [!] Python не найден. Установи Python 3.10+ и добавь его в PATH.
     pause
     exit /b 1
 )
 
-echo [2/3] Proverka PyInstaller...
+echo [2/3] Проверка PyInstaller...
 python -c "import PyInstaller" >nul 2>nul
 if errorlevel 1 (
-    echo     Ustanovka PyInstaller...
+    echo     Установка PyInstaller...
     python -m pip install --quiet pyinstaller
 )
 
-echo [3/3] Sborka exe...
+echo [3/3] Сборка exe...
 python -m PyInstaller --onefile --noconsole --name IMMY ^
     --hidden-import tkinter --hidden-import winsound ^
     main.py
 if errorlevel 1 (
-    echo [!] Oshibka sborki.
+    echo [!] Ошибка сборки.
     pause
     exit /b 1
 )
 
 echo.
 echo ============================================
-echo   Gotovo: dist\IMMY.exe
-echo   Ishodnye faily ostayutsya v papke -
-echo   kod mozhno pravit i peresobrat snova
-echo   zapuskom build.bat
+echo   Готово: dist\IMMY.exe
+echo   Исходные файлы остаются в папке -
+echo   код можно править и пересобрать снова
+echo   запуском build.bat
 echo ============================================
 pause

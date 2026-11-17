@@ -15,7 +15,7 @@ DEFAULT_STATS = {"wins": 0, "bosses": 0, "waves": 0, "specials": 0, "ults": 0,
                  "haze": 0, "legend_ults": 0, "crafts": 0, "traps": 0, "headshots": 0}
 
 DEFAULT_SETTINGS = {"music": MUSIC_VOL, "sfx": SFX_VOL, "mute": False,
-                    "shake": True, "blood": True}
+                    "shake": True, "blood": True, "fullscreen": False}
 
 
 def default_save():
@@ -23,7 +23,7 @@ def default_save():
             "plvl": 1, "camp": {}, "camp_claimed": [], "ach": [],
             "stats": dict(DEFAULT_STATS),
             "settings": dict(DEFAULT_SETTINGS),
-            "frags": {}, "arts": [], "equip": {}}
+            "frags": {}, "arts": [], "equip": {}, "bps": {}}
 
 
 def load_save():
@@ -60,6 +60,7 @@ def load_save():
         s["mute"] = bool(settings.get("mute", False))
         s["shake"] = bool(settings.get("shake", True))
         s["blood"] = bool(settings.get("blood", True))
+        s["fullscreen"] = bool(settings.get("fullscreen", False))
     frags = raw.get("frags", {})
     if isinstance(frags, dict):
         d["frags"] = {str(k): max(0, int(v)) for k, v in frags.items()}
@@ -74,6 +75,9 @@ def load_save():
                 slots = [a for a in v if isinstance(a, str)][:ART_SLOTS]
                 eq[str(k)] = slots
         d["equip"] = eq
+    bps = raw.get("bps", {})
+    if isinstance(bps, dict):
+        d["bps"] = {str(k): max(0, int(v)) for k, v in bps.items()}
     return d
 
 
