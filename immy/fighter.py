@@ -79,6 +79,10 @@ class Fighter:
         self.base_speed = 1.0
         self.is_bot = False
         self.reaction = 0.5
+        self.synced = False
+        self.tx = self.x
+        self.ty = self.y
+        self.fatality_hide = False
         self.flash_mult = 0.4
         self.rage_mult = 1.5
         self.has_scythe = any(ab.get("kind") == "scythe" for ab in self.h["abilities"])

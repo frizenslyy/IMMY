@@ -5,7 +5,7 @@ import os
 TITLE = "IMMY"
 
 W, H = 1600, 900
-FPS = 75
+FPS = 90
 TICK_MS = 1000 // FPS
 GROUND_Y = 770
 WALL = 80
@@ -68,3 +68,18 @@ ULT_QUALITY = 0.05
 ULT_LEFT = 4.0
 ULT_RANGE_Y = 200
 FINISHER_BONUS = 25
+
+RARITY_POWER = {"standard": 1.0, "common": 1.0, "uncommon": 1.06,
+                "exclusive": 1.10, "epic": 1.13, "mythic": 1.20, "devil": 1.28}
+
+FATALITY_WINDOW = 4.5
+FATALITY_BONUS = 150
+FATALITY_GEMS = 5
+FATALITY_ANIM_T = 2.6
+FATALITY_KEYS = ("w", "a", "s", "d", "e", "f", "attack")
+FATALITY_TXT = {"w": "W", "a": "A", "s": "S", "d": "D", "e": "E", "f": "F", "attack": "ЛКМ"}
+
+NET_DISCOVER_PORT = 55555
+NET_FIGHT_PORT = 55556
+NET_SCAN_TIMEOUT = 0.8
+NET_SNAP_HZ = 30
