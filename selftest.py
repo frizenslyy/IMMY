@@ -987,6 +987,16 @@ def main():
     assert au.music.enabled and au.music.volume == 0.3
     print("audio settings ok")
 
+    from immy.heroes import RARITY_ORDER, sorted_keys
+    ks = sorted_keys(list(HEROES))
+    orders = [RARITY_ORDER[HEROES[k]["rarity"]] for k in ks]
+    assert len(ks) == len(HEROES) and len(set(ks)) == len(HEROES)
+    assert orders == sorted(orders), "heroes sorted by rarity"
+    shop_ks = [k for k in ks
+               if HEROES[k]["rarity"] in ("common", "uncommon", "epic", "mythic", "legendary")]
+    assert shop_ks == sorted_keys(shop_ks), "shop heroes sorted by rarity"
+    print("hero/shop sorting ok")
+
     print("SELFTEST OK")
 
 

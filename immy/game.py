@@ -3,6 +3,7 @@
 import math
 import random
 import traceback
+import textwrap
 import time
 import tkinter as tk
 
@@ -21,7 +22,7 @@ from .config import (ART_SLOTS, CHEST_COST, CHEST_HELL_COST, COL_BLOOD, COL_GEM,
                      NET_SNAP_HZ, RARITY_POWER, SURV_FRAG_BOSS_CHANCE, SURV_FRAG_CHANCE,
                      TICK_MS, TITLE, W, exp_to_next)
 from .fighter import Fighter
-from .heroes import HEROES, RARITY_COLOR, RARITY_LABEL, STAT_NAMES
+from .heroes import HEROES, RARITY_COLOR, RARITY_LABEL, STAT_NAMES, sorted_keys
 from .particles import Embers, Particles
 from .save import load_save, save_save
 from .sound import Audio
@@ -118,20 +119,27 @@ def norm_key(e):
 class Game(tk.Tk):
     def __init__(self):
         super().__init__()
+        try:
+            self.tk.call("tk", "scaling", 96.0 / 72.0)
+        except Exception:
+            pass
         self.title(TITLE)
         self.geometry("%dx%d" % (W, H))
         self.resizable(False, False)
         self.cv = tk.Canvas(self, width=W, height=H, bg="#120406", highlightthickness=0)
-        self.cv.pack()
+        self.cv.place(x=0, y=0)
+        self._home_geom = "%dx%d+0+0" % (W, H)
         try:
             self.update_idletasks()
             sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
             if sw and sh:
+                self._home_geom = "%dx%d+%d+%d" % (W, H, max(0, (sw - W) // 2), max(0, (sh - H) // 2))
                 self.geometry("+%d+%d" % (max(0, (sw - W) // 2), max(0, (sh - H) // 2)))
         except Exception:
             pass
         self.save = load_save()
-        self.apply_fullscreen()
+        self.bind("<Map>", self._fs_on_map, add="+")
+        self.after(150, self.apply_fullscreen)
         self.coins = self.save["coins"]
         self.gems = self.save["gems"]
         self.bot_level = self.save["bot_level"]
@@ -159,6 +167,9 @@ class Game(tk.Tk):
         self.camp_page = 0
         self.shop_hero_page = 0
         self.net_hero_page = 0
+        self.hero_page = 0
+        self.equip_page = 0
+        self._wrap_cpl = {}
         self.chest_kind = "chaos"
         self.equip_scroll = 0
         self.info_page = 0
@@ -343,6 +354,7 @@ class Game(tk.Tk):
 
     def pick_hero(self, key):
         self.hero_sel = key
+        self.equip_page = 0
         if self.state in ("heroes", "select"):
             self.preview = Fighter(key, W / 2, 1, scale=2.4)
             self.preview.y = GROUND_Y - 19
@@ -920,9 +932,24 @@ class Game(tk.Tk):
         self.audio.apply(s)
         self.persist()
 
-    def apply_fullscreen(self):
+    def _fs_on_map(self, _e=None):
         try:
-            self.attributes("-fullscreen", bool(self.save["settings"].get("fullscreen")))
+            self.unbind("<Map>")
+        except Exception:
+            pass
+        self.after(60, self.apply_fullscreen)
+
+    def apply_fullscreen(self):
+        fs = bool(self.save["settings"].get("fullscreen"))
+        try:
+            self.attributes("-fullscreen", fs)
+            self.resizable(not fs, not fs)
+            if fs:
+                self.geometry("%dx%d+0+0" % (W, H))
+                self.cv.place(relx=0.5, rely=0.5, anchor="center")
+            else:
+                self.cv.place(x=0, y=0)
+                self.geometry(self._home_geom)
         except Exception:
             pass
 
@@ -1003,7 +1030,7 @@ class Game(tk.Tk):
     def draw_net_select(self):
         cv = self.cv
         sel = self.net_my_pick or self.hero_sel
-        keys = list(HEROES)
+        keys = sorted_keys(list(HEROES))
         per = 32
         pages = (len(keys) + per - 1) // per
         page = max(0, min(self.net_hero_page, pages - 1))
@@ -1059,7 +1086,9 @@ class Game(tk.Tk):
         cv.create_text(1308, 132, text=sel, fill=COL_GOLD, font=F_BIG, tags=("dyn"))
         cv.create_text(1308, 162, text=hero["title"], fill="#ff5a1a", font=F_SMALL, tags=("dyn"))
         cv.create_text(1308, 184, text="ДРУЖЕСКИЙ БОЙ · СИЛА 1.00", fill=COL_GEM, font=F_TINY, tags=("dyn"))
-        cv.create_text(1308, 216, text=hero["desc"], fill="#e8c9a0", font=F_TINY, width=480, tags=("dyn"))
+        for li, ln2 in enumerate(self._wrap(hero["desc"], 470, 11, cap=4)):
+            cv.create_text(1070, 226 + li * 14, text=ln2, anchor="w", fill="#e8c9a0",
+                           font=F_TINY, tags=("dyn",))
         cv.create_text(1070, 272, text="СТАТЫ", anchor="w", fill=COL_ORANGE, font=F_SMALL, tags=("dyn"))
         for j, (skey, sname, scol) in enumerate(STAT_NAMES):
             val = hero["stats"][skey]
@@ -1320,7 +1349,8 @@ class Game(tk.Tk):
     def draw_heroes(self, select_mode):
         cv = self.cv
         sel = self.hero_sel
-        keys = [k for k in HEROES if k in self.owned] if select_mode else list(HEROES)
+        keys = sorted_keys([k for k in HEROES if k in self.owned]) if select_mode \
+            else sorted_keys(list(HEROES))
         if sel not in keys and keys:
             sel = keys[0]
             self.hero_sel = sel
@@ -1328,7 +1358,11 @@ class Game(tk.Tk):
             self.preview.y = GROUND_Y - 19
         cv.create_rectangle(24, 100, 460, 860, fill="#1a0908", outline="#5a1c10", width=2, tags=("dyn",))
         cv.create_text(242, 122, text="БОЙЦЫ", fill=COL_ORANGE, font=F_MID, tags=("dyn",))
-        for i, key in enumerate(keys):
+        per = 56
+        pages = max(1, (len(keys) + per - 1) // per)
+        page = max(0, min(self.hero_page, pages - 1))
+        self.hero_page = page
+        for i, key in enumerate(keys[page * per:(page + 1) * per]):
             col, row = i % 4, i // 4
             x0 = 32 + col * 108
             y0 = 150 + row * 46
@@ -1344,6 +1378,14 @@ class Game(tk.Tk):
                 cv.create_text(x0 + 40, y0 + 30, text="%d" % HEROES[key]["price"],
                                anchor="w", fill="#8a4a20", font=F_TINY, tags=("dyn",))
             self.buttons.append((x0, y0, x1, y1, lambda k=key: self.pick_hero(k)))
+
+        if len(keys) > per:
+            cv.create_text(242, 826, text="СТРАНИЦА %d / %d" % (page + 1, pages),
+                           fill=COL_SAND, font=F_TINY, tags=("dyn",))
+            if page > 0:
+                self.ui.button(cv, 40, 806, 120, 844, "<", lambda: self._hero_page(-1), font=F_SMALL)
+            if page < pages - 1:
+                self.ui.button(cv, 364, 806, 444, 844, ">", lambda: self._hero_page(1), font=F_SMALL)
 
         if self.preview is not None:
             cv.create_oval(W / 2 - 160, GROUND_Y - 38, W / 2 + 160, GROUND_Y + 4,
@@ -1362,7 +1404,9 @@ class Game(tk.Tk):
         pw = RARITY_POWER.get(hero["rarity"], 1.0)
         cv.create_text(1358, 204, text=("СИЛА: x%.2f (против бота)" % pw) if pw > 1.0 else "СИЛА: x1.00",
                        fill=COL_GEM, font=F_TINY, tags=("dyn",))
-        cv.create_text(1358, 232, text=hero["desc"], fill="#e8c9a0", font=F_TINY, width=400, tags=("dyn"))
+        for li, ln2 in enumerate(self._wrap(hero["desc"], 392, 11, cap=4)):
+            cv.create_text(1170, 218 + li * 14, text=ln2, anchor="w", fill="#e8c9a0",
+                           font=F_TINY, tags=("dyn",))
         cv.create_text(1170, 292, text="СТАТЫ", anchor="w", fill=COL_ORANGE, font=F_SMALL, tags=("dyn",))
         for j, (skey, sname, scol) in enumerate(STAT_NAMES):
             val = hero["stats"][skey]
@@ -1387,13 +1431,23 @@ class Game(tk.Tk):
                                fill="#7a4030", font=F_TINY, tags=("dyn",))
                 y = 614
                 break
-            cv.create_text(1170, y, text="[%d] %s%s" % (i + 1, ab["name"], tag), anchor="w",
+            nm = "[%d] %s%s" % (i + 1, ab["name"], tag)
+            if len(nm) > 34:
+                nm = nm[:33] + "…"
+            cv.create_text(1170, y, text=nm, anchor="w",
                            fill=tcol, font=F_SMALL, tags=("dyn",))
-            cv.create_text(1560, y, text="%dс" % ab["cd"], anchor="e", fill="#ff5a1a", font=F_SMALL, tags=("dyn",))
-            nlines = max(1, -(-len(ab["desc"]) // 34))
-            cv.create_text(1176, y + 15, text=ab["desc"], anchor="w", fill=COL_SAND, font=F_TINY,
-                           width=374, tags=("dyn",))
-            y += 17 + nlines * 13 + 6
+            cv.create_text(1566, y, text="%d\u0441" % ab["cd"], anchor="e", fill="#ff5a1a",
+                           font=F_SMALL, tags=("dyn",))
+            dsc = ab["desc"]
+            if ab["kind"] == "myth_ult":
+                dsc = "Миф-ульта (1+4 или R): обе способности готовы, полная энергия + шкала УЛЬТЫ, враг ≤25% HP. Добивание."
+            elif ab["kind"] == "legend_ult":
+                dsc = "Лег-ульта (R): полная энергия + шкала УЛЬТЫ, враг ≤30% HP. Добивание."
+            dl = self._wrap(dsc, 388, 11, cap=3)
+            for li, ln2 in enumerate(dl):
+                cv.create_text(1176, y + 16 + li * 13, text=ln2, anchor="w", fill=COL_SAND,
+                               font=F_TINY, tags=("dyn",))
+            y += 17 + len(dl) * 13 + 6
         sps = hero.get("specials", ())
         if sps and y < 560:
             cv.create_text(1170, y + 2, text="СПЕЦПРИЁМЫ", anchor="w",
@@ -1436,6 +1490,25 @@ class Game(tk.Tk):
                                fill=c["color"], font=F_SMALL, tags=("dyn",))
             self.ui.button(cv, W / 2 - 150, 848, W / 2 + 150, 890, "В БОЙ!", self.start_fight, font=F_SMALL)
 
+    def _wrap(self, txt, width_px, pt, weight="normal", cap=None):
+        key = (width_px, pt, weight)
+        cpl = self._wrap_cpl.get(key, 0)
+        if cpl < 12:
+            try:
+                import tkinter.font as tkfont
+                fnt = tkfont.Font(family="Courier", size=pt, weight=weight)
+                cpl = int(width_px / max(1.0, fnt.measure("ШШ") / 2.0))
+            except Exception:
+                cpl = 0
+            if cpl < 12:
+                cpl = max(12, int(width_px / (pt * 0.85)))
+            self._wrap_cpl[key] = cpl
+        lines = textwrap.wrap(txt, cpl) or [""]
+        if cap and len(lines) > cap:
+            lines = lines[:cap]
+            lines[-1] = lines[-1][:max(1, cpl - 2)].rstrip() + "…"
+        return lines
+
     def equip_of(self, key):
         return self.save["equip"].setdefault(key, [])
 
@@ -1470,7 +1543,6 @@ class Game(tk.Tk):
                                font=F_TINY, tags=("dyn",))
                 self.buttons.append((x0, 704, x1, 740, lambda k=hero_key, a=aid: self.toggle_art(k, a)))
         owned = self.save["arts"]
-        bps = self.save.get("bps", {})
         if not owned:
             cv.create_text(1170, 762, text="Нет артефактов — крафт в SHOP", anchor="w",
                            fill="#7a4030", font=F_TINY, tags=("dyn",))
@@ -1478,17 +1550,17 @@ class Game(tk.Tk):
         cv.create_text(1170, 756, text="НАДЕТЬ/СНЯТЬ:", anchor="w", fill=COL_ORANGE,
                        font=F_TINY, tags=("dyn",))
         ordered = sorted(owned, key=lambda a: a not in slots)
-        hidden = 0
-        for j, aid in enumerate(ordered):
+        per, cols = 12, 3
+        pages = max(1, (len(ordered) + per - 1) // per)
+        page = max(0, min(self.equip_page, pages - 1))
+        self.equip_page = page
+        for j, aid in enumerate(ordered[page * per:(page + 1) * per]):
             art = ART_BY_ID.get(aid)
             if art is None:
                 continue
-            row, col = j // 3, j % 3
+            row, col = j // cols, j % cols
             x0 = 1170 + col * 132
-            y0 = 772 + row * 20
-            if y0 > 846:
-                hidden += 1
-                continue
+            y0 = 776 + row * 20
             on = aid in slots
             match = art["nature"] == nat
             colr = NATURE_COLOR[art["nature"]]
@@ -1499,9 +1571,15 @@ class Game(tk.Tk):
                                font=F_TINY, tags=("dyn",))
             self.buttons.append((x0 - 4, y0 - 9, x0 + 124, y0 + 9,
                                  lambda k=hero_key, a=aid: self.toggle_art(k, a)))
-        if hidden:
-            cv.create_text(1170, 852, text="+%d ещё — всего %d" % (hidden, len(ordered)),
-                           anchor="w", fill="#7a4030", font=F_TINY, tags=("dyn",))
+        if pages > 1:
+            if page > 0:
+                self.ui.button(cv, 1300, 748, 1336, 772, "<",
+                               lambda: self._equip_page(-1), font=F_SMALL)
+            cv.create_text(1348, 760, text="СТР %d/%d" % (page + 1, pages),
+                           anchor="w", fill=COL_SAND, font=F_TINY, tags=("dyn",))
+            if page < pages - 1:
+                self.ui.button(cv, 1540, 748, 1576, 772, ">",
+                               lambda: self._equip_page(1), font=F_SMALL)
 
     def draw_shop(self):
         cv = self.cv
@@ -1555,7 +1633,8 @@ class Game(tk.Tk):
         cv.create_rectangle(fx, 162, fx + 26, 190, fill="#160607", outline=COL_GOLD, width=2, tags=("dyn",))
         cv.create_text(fx + 13, 176, text=str(sum(bps.values())), fill=COL_GOLD, font=F_TINY, tags=("dyn",))
         cv.create_text(fx + 32, 176, text=BPS_LABEL, anchor="w", fill=COL_GOLD, font=F_TINY, tags=("dyn",))
-        chunk = ARTIFACTS[page * per:(page + 1) * per]
+        arts_sorted = sorted(ARTIFACTS, key=lambda a: (a["tier"], a["name"]))
+        chunk = arts_sorted[page * per:(page + 1) * per]
         for i, art in enumerate(chunk):
             col, row = i % cols, i // cols
             x0 = 60 + col * 750
@@ -1622,8 +1701,8 @@ class Game(tk.Tk):
 
     def draw_shop_heroes(self):
         cv = self.cv
-        keys = [k for k, v in HEROES.items()
-                if v["rarity"] in ("common", "uncommon", "epic", "mythic", "legendary")]
+        keys = sorted_keys([k for k, v in HEROES.items()
+                            if v["rarity"] in ("common", "uncommon", "epic", "mythic", "legendary")])
         per = 24
         pages = (len(keys) + per - 1) // per
         page = max(0, min(self.shop_hero_page, pages - 1))
@@ -1659,6 +1738,14 @@ class Game(tk.Tk):
         if page < pages - 1:
             self.ui.button(cv, W / 2 + 180, 848, W / 2 + 260, 884, ">",
                            lambda: self._shop_hero_page(1), font=F_SMALL)
+
+    def _hero_page(self, d):
+        pages = max(1, (len(HEROES) + 55) // 56)
+        self.hero_page = max(0, min(pages - 1, self.hero_page + d))
+
+    def _equip_page(self, d):
+        pages = max(1, (len(self.save["arts"]) + 11) // 12)
+        self.equip_page = max(0, min(pages - 1, self.equip_page + d))
 
     def _shop_hero_page(self, d):
         keys = [k for k, v in HEROES.items()
@@ -1746,7 +1833,6 @@ class Game(tk.Tk):
                 cv.create_text(cx, 300, text="+%d САМОЦВЕТОВ" % rw[1], font=F_BIG, fill=COL_GEM, tags=("dyn",))
                 cv.create_oval(cx - 48, 372, cx + 48, 468, fill=COL_GEM, outline="#0a4a3a",
                                width=3, tags=("dyn",))
-                cv.create_text(cx, 560, text=self.chest_title(), font=F_TINY, fill=COL_SAND, tags=("dyn",))
                 cv.create_text(cx, 560, text=self.chest_title(), font=F_TINY, fill=COL_SAND, tags=("dyn",))
             else:
                 key = rw[1]

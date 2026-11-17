@@ -901,6 +901,15 @@ HEROES = {
 HERO_KEYS = tuple(HEROES)
 STANDARD_KEYS = tuple(k for k, v in HEROES.items() if v["rarity"] == "standard")
 
+RARITY_ORDER = {"standard": 0, "common": 1, "uncommon": 2, "exclusive": 3,
+                "epic": 4, "mythic": 5, "devil": 6, "legendary": 7}
+
+
+def sorted_keys(keys):
+    """Сортировка ключей бойцов по возрастанию силы редкости."""
+    return sorted(keys, key=lambda k: (RARITY_ORDER.get(HEROES[k]["rarity"], 99), k))
+
+
 RARITY_LABEL = {"standard": "СТАНДАРТ", "common": "ОБЫЧНЫЙ", "uncommon": "НЕОБЫЧНЫЙ",
               "epic": "ЭПИЧЕСКИЙ", "exclusive": "ЭКСКЛЮЗИВНЫЙ",
               "mythic": "МИФИЧЕСКИЙ", "devil": "ПРОКЛЯТЫЙ", "legendary": "ЛЕГЕНДАРНЫЙ"}
