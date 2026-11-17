@@ -5,7 +5,7 @@ import random
 import time
 import tkinter as tk
 
-from . import achievements, artifacts, campaign, netplay
+from . import achievements, artifacts, campaign, chests, netplay
 from .arena import Arena
 from .artifacts import (ARTIFACTS, ART_BY_ID, BUFF_LABEL, NATURE_BY_STYLE, NATURE_COLOR,
                         NATURE_LABEL, NATURES, artifact_buffs, can_craft, craft_cost_label,
@@ -13,7 +13,7 @@ from .artifacts import (ARTIFACTS, ART_BY_ID, BUFF_LABEL, NATURE_BY_STYLE, NATUR
 from .background import (MAPS, draw_ambient, draw_fight_bg, draw_hero_icon,
                          draw_menu_bg, draw_screen_bg, draw_torches, draw_trap_static,
                          draw_traps)
-from .config import (ART_SLOTS, CHEST_COST, COL_BLOOD, COL_GEM, COL_GOLD, COL_ORANGE,
+from .config import (ART_SLOTS, CHEST_COST, CHEST_HELL_COST, COL_BLOOD, COL_GEM, COL_GOLD, COL_ORANGE,
                      COL_RED, COL_SAND, FATALITY_BONUS, FATALITY_GEMS,
                      FATALITY_KEYS, FINISHER_BONUS, F_BIG, F_HUGE, F_MID,
                      F_SMALL, F_SQUARE, F_TINY, FPS, GROUND_Y, H,
@@ -74,8 +74,8 @@ INFO_MECH = [
 
 
 INFO_MODES = [
-    ("МУЧЕНИК: 3 раунда против врага x6 HP и x4 урона — нанесите максимум урона", COL_RED),
-    ("МУЧЕНИК: победа (2 раунда) = 100 самоцветов · поражение = монеты за урон", COL_GEM),
+    ("МУЧЕНИК: 10 раундов против врага x10 HP и x10 урона — HP врага не восстанавливается", COL_RED),
+    ("МУЧЕНИК: победа (убейте врага) = 100 самоцветов · поражение = монеты за урон", COL_GEM),
     ("ЛЕГЕНДАРНЫЙ — новая редкость: 5 героев, 4 способности, сильнейший ульт", COL_GOLD),
     ("УЛЬТА (R): полная энергия + полная шкала УЛЬТЫ; легендарным также враг <30% HP", "#ff2a8a"),
     ("ШКАЛА УЛЬТЫ (розовая, под энергией): заполняется от нанесённых и полученных ударов", "#ff2a8a"),
@@ -152,6 +152,9 @@ class Game(tk.Tk):
         self.shop_msg = None
         self.shop_tab = "heroes"
         self.art_page = 0
+        self.shop_hero_page = 0
+        self.net_hero_page = 0
+        self.chest_kind = "chaos"
         self.equip_scroll = 0
         self.info_page = 0
         self.chest_t = None
@@ -351,31 +354,28 @@ class Game(tk.Tk):
         self.shop_msg = ("КУПЛЕНО: %s!" % hero["name"], time.time() + 2.5)
 
     def chest_keys(self, rarity):
-        return [k for k, v in HEROES.items() if v["rarity"] == rarity]
+        return chests.keys_of(rarity)
+
+    def roll_hell_chest(self):
+        return chests.roll_hell()
 
     def roll_chest(self):
-        r = random.random()
-        if r < 0.05:
-            return ("hero", "DEVILY")
-        if r < 0.13:
-            return ("hero", random.choice(self.chest_keys("mythic")))
-        if r < 0.20:
-            return ("hero", random.choice(self.chest_keys("legendary")))
-        if r < 0.36:
-            return ("hero", random.choice(self.chest_keys("epic")))
-        if r < 0.60:
-            return ("hero", random.choice(self.chest_keys("uncommon")))
-        return ("coins", random.randint(150, 500))
+        return chests.roll_chaos()
 
-    def buy_chest(self):
-        if self.gems < CHEST_COST:
-            self.shop_msg = ("НЕ ХВАТАЕТ САМОЦВЕТОВ (%d/%d)" % (self.gems, CHEST_COST),
+    def buy_chest(self, chest="chaos"):
+        cost = CHEST_COST if chest == "chaos" else CHEST_HELL_COST
+        if self.gems < cost:
+            self.shop_msg = ("НЕ ХВАТАЕТ САМОЦВЕТОВ (%d/%d)" % (self.gems, cost),
                              time.time() + 2.5)
             return
-        self.gems -= CHEST_COST
+        self.gems -= cost
         self.save["gems"] = self.gems
         self.save["stats"]["chests"] = self.save["stats"].get("chests", 0) + 1
-        kind, val = self.roll_chest()
+        self.chest_kind = chest
+        kind, val = self.roll_chest() if chest == "chaos" else self.roll_hell_chest()
+        if kind == "gems":
+            self.earn_gems(val)
+            self.chest_reward = ("gems", val)
         if kind == "hero":
             if val in self.owned:
                 comp = HEROES[val]["price"] // 2 + 10
@@ -392,6 +392,9 @@ class Game(tk.Tk):
         self.persist()
         self.chest_t = 0.0
         self.set_state("chest_open")
+
+    def chest_title(self):
+        return chests.title(self.chest_kind)
 
     def collect_chest(self):
         self.chest_t = None
@@ -886,24 +889,24 @@ class Game(tk.Tk):
         cv = self.cv
         cv.create_text(W / 2 + 3, 123, text="PLAY", font=F_BIG, fill="#2a0503", tags=("dyn",))
         cv.create_text(W / 2, 120, text="PLAY", font=F_BIG, fill=COL_GOLD, tags=("dyn",))
-        self.ui.button(cv, W / 2 - 340, 170, W / 2 - 20, 260, "VS БОТ", self.goto_select, font=F_SQUARE)
-        self.ui.button(cv, W / 2 + 20, 170, W / 2 + 340, 260, "ВЫЖИВАНИЕ",
+        self.ui.button(cv, W / 2 - 340, 170, W / 2 - 20, 260, "VS BOT", self.goto_select, font=F_SQUARE)
+        self.ui.button(cv, W / 2 + 20, 170, W / 2 + 340, 260, "SURVIVAL",
                        lambda: self.goto_select("survival"), font=F_SQUARE)
         self.ui.button(cv, W / 2 - 340, 280, W / 2 - 20, 370, "CAMPAIGN",
                        self.goto_campaigns, font=F_SQUARE)
-        self.ui.button(cv, W / 2 + 20, 280, W / 2 + 340, 370, "МУЧЕНИК",
+        self.ui.button(cv, W / 2 + 20, 280, W / 2 + 340, 370, "MARTYR",
                        lambda: self.goto_select("martyr"), font=F_SQUARE)
         self.ui.button(cv, W / 2 - 340, 390, W / 2 - 20, 480, "ONLINE",
                        self.goto_online, font=F_SQUARE)
         self.ui.button(cv, W / 2 + 20, 390, W / 2 + 340, 480, "FRIEND",
                        self.goto_net, font=F_SQUARE)
-        cv.create_text(W / 2, 520, text="БОТ: УРОВЕНЬ %d" % self.bot_level, fill=COL_ORANGE,
+        cv.create_text(W / 2, 520, text="BOT: LEVEL %d" % self.bot_level, fill=COL_ORANGE,
                        font=F_MID, tags=("dyn",))
         if self.bot_level % 10 == 0:
-            cv.create_text(W / 2, 548, text="!! ВНИМАНИЕ: ЭТО БОСС !!", fill=COL_RED, font=F_MID, tags=("dyn",))
-        cv.create_text(W / 2, 574, text="ВЫЖИВАНИЕ: волны врагов · каждая 5-я — мини-босс · фрагменты для артефактов",
+            cv.create_text(W / 2, 548, text="!! WARNING: THIS IS A BOSS !!", fill=COL_RED, font=F_MID, tags=("dyn",))
+        cv.create_text(W / 2, 574, text="SURVIVAL: enemy waves · every 5th is a mini-boss · artifact fragments",
                        fill=COL_SAND, font=F_TINY, tags=("dyn",))
-        cv.create_text(W / 2, 596, text="МУЧЕНИК: победа = 100 самоцветов · ONLINE/FRIEND: полный баланс, без артефактов",
+        cv.create_text(W / 2, 596, text="MARTYR: win = 100 gems · ONLINE/FRIEND: full balance, no artifacts",
                        fill=COL_GEM, font=F_TINY, tags=("dyn",))
         self.ui.coins(cv, W / 2 - 90, 640, self.coins)
         self.ui.gems(cv, W / 2 + 60, 640, self.gems)
@@ -960,9 +963,13 @@ class Game(tk.Tk):
         cv = self.cv
         sel = self.net_my_pick or self.hero_sel
         keys = list(HEROES)
+        per = 32
+        pages = (len(keys) + per - 1) // per
+        page = max(0, min(self.net_hero_page, pages - 1))
+        self.net_hero_page = page
         cv.create_rectangle(24, 100, 560, 860, fill="#1a0908", outline="#5a1c10", width=2, tags=("dyn",))
         cv.create_text(292, 122, text="ВСЕ БОЙЦЫ · БАЛАНС", fill=COL_ORANGE, font=F_MID, tags=("dyn"))
-        for i, key in enumerate(keys):
+        for i, key in enumerate(keys[page * per:(page + 1) * per]):
             col, row = i % 4, i // 4
             x0 = 34 + col * 130
             y0 = 150 + row * 78
@@ -980,6 +987,12 @@ class Game(tk.Tk):
             if fo and not my:
                 cv.create_text(x1 - 6, y0 + 58, text="ВРАГ", anchor="e", fill="#ff2a8a", font=F_TINY, tags=("dyn"))
             self.buttons.append((x0, y0, x1, y1, lambda k=key: self.net_pick(k)))
+        cv.create_text(292, 824, text="СТРАНИЦА %d / %d" % (page + 1, pages), fill=COL_SAND,
+                       font=F_TINY, tags=("dyn",))
+        if page > 0:
+            self.ui.button(cv, 60, 806, 140, 842, "<", lambda: self._net_hero_page(-1), font=F_SMALL)
+        if page < pages - 1:
+            self.ui.button(cv, 440, 806, 520, 842, ">", lambda: self._net_hero_page(1), font=F_SMALL)
 
         cx = 800
         for j, (label, key, colr) in enumerate((("ВЫ", self.net_my_pick, COL_GOLD),
@@ -1022,9 +1035,9 @@ class Game(tk.Tk):
             cv.create_text(1560, y, text="%dс" % ab["cd"], anchor="e", fill="#ff5a1a", font=F_SMALL, tags=("dyn"))
             cv.create_text(1076, y + 15, text=ab["desc"], anchor="w", fill=COL_SAND, font=F_TINY,
                            width=470, tags=("dyn"))
-            y += 44
+            y += 17 + max(1, -(-len(ab["desc"]) // 58)) * 13 + 8
         sps = hero.get("specials", ())
-        if sps:
+        if sps and y < 760:
             cv.create_text(1070, y + 2, text="СПЕЦПРИЁМЫ", anchor="w", fill=COL_ORANGE, font=F_SMALL, tags=("dyn"))
             for sp in sps:
                 y += 20
@@ -1042,6 +1055,10 @@ class Game(tk.Tk):
         else:
             cv.create_text(cx, 858, text="Хост начинает бой..." if self.net_foe_pick else "Выберите бойца — хост начнёт бой",
                            fill=COL_ORANGE, font=F_SMALL, tags=("dyn"))
+
+    def _net_hero_page(self, d):
+        pages = (len(HEROES) + 31) // 32
+        self.net_hero_page = max(0, min(pages - 1, self.net_hero_page + d))
 
     def net_pick(self, key):
         self.net_my_pick = key
@@ -1296,12 +1313,13 @@ class Game(tk.Tk):
             cv.create_text(1510, yy, text=str(val), anchor="w", fill=COL_GOLD, font=F_TINY, tags=("dyn",))
         cv.create_text(1170, 392, text="СПОСОБНОСТИ", anchor="w", fill=COL_ORANGE, font=F_SMALL, tags=("dyn",))
         y = 412
-        step = 46 if len(hero["abilities"]) > 3 else 58
         for i, ab in enumerate(hero["abilities"]):
             if ab["kind"] == "ult":
                 tag, tcol = " · УЛЬТ", COL_RED
             elif ab["kind"] == "myth_ult":
                 tag, tcol = " · МИФ-УЛЬТА (1+4)", "#ff2a8a"
+            elif ab["kind"] == "legend_ult":
+                tag, tcol = " · ЛЕГ-УЛЬТА (R)", "#ffc400"
             else:
                 tag, tcol = "", COL_GOLD
             cv.create_text(1170, y, text="[%d] %s%s" % (i + 1, ab["name"], tag), anchor="w",
@@ -1309,9 +1327,9 @@ class Game(tk.Tk):
             cv.create_text(1560, y, text="%dс" % ab["cd"], anchor="e", fill="#ff5a1a", font=F_SMALL, tags=("dyn",))
             cv.create_text(1176, y + 15, text=ab["desc"], anchor="w", fill=COL_SAND, font=F_TINY,
                            width=374, tags=("dyn",))
-            y += step
+            y += 17 + max(1, -(-len(ab["desc"]) // 46)) * 13 + 8
         sps = hero.get("specials", ())
-        if sps:
+        if sps and y < 620:
             cv.create_text(1170, y + 2, text="СПЕЦПРИЁМЫ", anchor="w",
                            fill=COL_ORANGE, font=F_SMALL, tags=("dyn",))
             cv.create_text(1560, y + 2, text="энергия · кд",
@@ -1324,7 +1342,8 @@ class Game(tk.Tk):
                                fill="#ff5a1a", font=F_SMALL, tags=("dyn",))
         pros = hero.get("pros", ())
         cons = hero.get("cons", ())
-        if pros and cons and y + 40 < 650:
+        pc_h = 22 + len(pros) * 18 + 18 + len(cons) * 18
+        if pros and cons and y + pc_h < 680:
             y += 22
             if pros:
                 cv.create_text(1170, y, text="ПЛЮСЫ", anchor="w", fill="#8aff8a", font=F_TINY, tags=("dyn",))
@@ -1461,7 +1480,7 @@ class Game(tk.Tk):
             col = NATURE_COLOR[nat]
             cv.create_rectangle(fx, 162, fx + 26, 190, fill="#160607", outline=col, width=2, tags=("dyn",))
             cv.create_text(fx + 13, 176, text=str(n), fill=col, font=F_TINY, tags=("dyn",))
-            cv.create_text(fx + 32, 176, text=NATURE_LABEL[nat][:4], anchor="w", fill=col,
+            cv.create_text(fx + 32, 176, text=NATURE_LABEL[nat], anchor="w", fill=col,
                            font=F_TINY, tags=("dyn",))
             fx += 118
         chunk = ARTIFACTS[page * per:(page + 1) * per]
@@ -1528,8 +1547,13 @@ class Game(tk.Tk):
 
     def draw_shop_heroes(self):
         cv = self.cv
-        keys = [k for k, v in HEROES.items() if v["rarity"] in ("common", "uncommon", "epic", "mythic")]
-        for i, key in enumerate(keys):
+        keys = [k for k, v in HEROES.items()
+                if v["rarity"] in ("common", "uncommon", "epic", "mythic", "legendary")]
+        per = 24
+        pages = (len(keys) + per - 1) // per
+        page = max(0, min(self.shop_hero_page, pages - 1))
+        self.shop_hero_page = page
+        for i, key in enumerate(keys[page * per:(page + 1) * per]):
             col, row = i % 6, i // 6
             x0 = 40 + col * 256
             y0 = 170 + row * 140
@@ -1552,34 +1576,61 @@ class Game(tk.Tk):
                 cv.create_text(x0 + 12, y1 - 18, text="%d МОНЕТ — КУПИТЬ" % hero["price"],
                                anchor="w", fill=price_col, font=F_SMALL, tags=("dyn",))
                 self.buttons.append((x0, y0, x1, y1, lambda k=key: self.buy_hero(k)))
+        cv.create_text(W / 2, 866, text="СТРАНИЦА %d / %d" % (page + 1, pages), fill=COL_SAND,
+                       font=F_SMALL, tags=("dyn",))
+        if page > 0:
+            self.ui.button(cv, W / 2 - 260, 848, W / 2 - 180, 884, "<",
+                           lambda: self._shop_hero_page(-1), font=F_SMALL)
+        if page < pages - 1:
+            self.ui.button(cv, W / 2 + 180, 848, W / 2 + 260, 884, ">",
+                           lambda: self._shop_hero_page(1), font=F_SMALL)
+
+    def _shop_hero_page(self, d):
+        keys = [k for k, v in HEROES.items()
+                if v["rarity"] in ("common", "uncommon", "epic", "mythic", "legendary")]
+        pages = (len(keys) + 23) // 24
+        self.shop_hero_page = max(0, min(pages - 1, self.shop_hero_page + d))
 
     def draw_chest_tab(self):
         cv = self.cv
-        cx = W // 2
         t = time.time()
         bob = math.sin(t * 2) * 6
-        cv.create_rectangle(cx - 340, 190, cx + 340, 800, fill="#1a0908",
-                            outline="#ff2a8a", width=3, tags=("dyn",))
-        cv.create_text(cx + 2, 234, text="СОКРОВИЩНИЦА ХАОСА", font=F_BIG, fill="#2a0503", tags=("dyn",))
-        cv.create_text(cx, 232, text="СОКРОВИЩНИЦА ХАОСА", font=F_BIG, fill="#ff2a8a", tags=("dyn",))
-        glow_r = 150 + math.sin(t * 3) * 10
-        cv.create_oval(cx - glow_r, 480 + bob - glow_r, cx + glow_r, 480 + bob + glow_r,
-                       outline="#ff2a8a", stipple="gray25", tags=("dyn",))
-        cv.create_rectangle(cx - 120, 400 + bob, cx + 120, 440 + bob, fill="#7a2210",
-                            outline="#2a0503", width=2, tags=("dyn",))
-        cv.create_rectangle(cx - 110, 440 + bob, cx + 110, 560 + bob, fill="#5a1c10",
-                            outline="#2a0503", width=2, tags=("dyn",))
-        cv.create_rectangle(cx - 16, 440 + bob, cx + 16, 480 + bob, fill=COL_GOLD,
-                            outline="#a1700a", width=2, tags=("dyn",))
-        cv.create_text(cx, 620, text="ЦЕНА: %d САМОЦВЕТОВ" % CHEST_COST, fill=COL_GEM,
-                       font=F_MID, tags=("dyn",))
-        cv.create_text(cx, 650, text="НЕОБЫЧНЫЙ 24% · ЭПИЧЕСКИЙ 16% · ЛЕГЕНДАРНЫЙ 7%", fill=COL_SAND,
-                       font=F_TINY, tags=("dyn",))
-        cv.create_text(cx, 672, text="МИФИЧЕСКИЙ 8% · DEVILY 5%", fill=COL_SAND,
-                       font=F_TINY, tags=("dyn",))
-        cv.create_text(cx, 694, text="МОНЕТЫ 40% (150-500) · повтор героя: компенсация", fill=COL_SAND,
-                       font=F_TINY, tags=("dyn",))
-        self.ui.button(cv, cx - 140, 720, cx + 140, 770, "ОТКРЫТЬ СУНДУК", self.buy_chest, font=F_SMALL)
+        cards = (
+            ("СОКРОВИЩНИЦА ХАОСА", "#ff2a8a", CHEST_COST, "chaos",
+             ("НЕОБЫЧНЫЙ 24% · ЭПИЧЕСКИЙ 16% · ЛЕГЕНДАРНЫЙ 7%",
+              "МИФИЧЕСКИЙ 8% · DEVILY 5%",
+              "МОНЕТЫ 40% (150-500) · повтор героя: компенсация")),
+            ("ЧЕРТОГИ АДА", "#ff5a1a", CHEST_HELL_COST, "hell",
+             ("IMPY 9% · DEMONDY 6% · SATANY 3% — только здесь",
+              "Любой герой: НЕОБЫЧНЫЙ/ЭПИЧЕСКИЙ 10% · ОБЫЧНЫЙ 6%",
+              "ЛЕГЕНДАРНЫЙ 6% · МИФИЧЕСКИЙ 6%",
+              "МОНЕТЫ 36% (400-900) · САМОЦВЕТЫ 8% (15-40)")),
+        )
+        for i, (title, colr, price, kind, odds) in enumerate(cards):
+            x0 = 40 + i * 780
+            x1 = x0 + 760
+            cx = (x0 + x1) / 2
+            cv.create_rectangle(x0, 170, x1, 800, fill="#1a0908", outline=colr, width=3, tags=("dyn",))
+            cv.create_text(cx + 2, 214, text=title, font=F_BIG, fill="#2a0503", tags=("dyn",))
+            cv.create_text(cx, 212, text=title, font=F_BIG, fill=colr, tags=("dyn",))
+            glow_r = 120 + math.sin(t * 3 + i * 1.7) * 8
+            cv.create_oval(cx - glow_r, 420 + bob - glow_r, cx + glow_r, 420 + bob + glow_r,
+                           outline=colr, stipple="gray25", tags=("dyn",))
+            cv.create_rectangle(cx - 100, 350 + bob, cx + 100, 385 + bob, fill="#7a2210",
+                                outline="#2a0503", width=2, tags=("dyn",))
+            cv.create_rectangle(cx - 92, 385 + bob, cx + 92, 480 + bob, fill="#5a1c10",
+                                outline="#2a0503", width=2, tags=("dyn",))
+            lock_col = COL_GOLD if kind == "chaos" else "#ff2a1a"
+            cv.create_rectangle(cx - 14, 385 + bob, cx + 14, 420 + bob, fill=lock_col,
+                                outline="#a1700a", width=2, tags=("dyn",))
+            cv.create_text(cx, 530, text="ЦЕНА: %d САМОЦВЕТОВ" % price,
+                           fill=COL_GEM, font=F_MID, tags=("dyn",))
+            for j, ln in enumerate(odds):
+                cv.create_text(cx, 566 + j * 20, text=ln, fill=COL_SAND, font=F_TINY, tags=("dyn",))
+            self.ui.button(cv, cx - 140, 668, cx + 140, 714, "ОТКРЫТЬ СГНДУК",
+                           lambda k=kind: self.buy_chest(k), font=F_SMALL)
+        cv.create_text(W / 2, 846, text="На монеты самый высокий шанс в обоих сундуках · в ЧЕРТОГАХ АДА шансы на редких героев выше",
+                       fill=COL_SAND, font=F_TINY, tags=("dyn",))
 
     def draw_chest_open(self):
         cv = self.cv
@@ -1616,7 +1667,12 @@ class Game(tk.Tk):
                 cv.create_text(cx, 300, text="+%d МОНЕТ" % rw[1], font=F_BIG, fill=COL_GOLD, tags=("dyn",))
                 cv.create_oval(cx - 48, 372, cx + 48, 468, fill=COL_GOLD, outline="#a1700a",
                                width=3, tags=("dyn",))
-                cv.create_text(cx, 560, text="СОКРОВИЩНИЦА ХАОСА", font=F_TINY, fill=COL_SAND, tags=("dyn",))
+            elif rw[0] == "gems":
+                cv.create_text(cx, 300, text="+%d САМОЦВЕТОВ" % rw[1], font=F_BIG, fill=COL_GEM, tags=("dyn",))
+                cv.create_oval(cx - 48, 372, cx + 48, 468, fill=COL_GEM, outline="#0a4a3a",
+                               width=3, tags=("dyn",))
+                cv.create_text(cx, 560, text=self.chest_title(), font=F_TINY, fill=COL_SAND, tags=("dyn",))
+                cv.create_text(cx, 560, text=self.chest_title(), font=F_TINY, fill=COL_SAND, tags=("dyn",))
             else:
                 key = rw[1]
                 hero = HEROES[key]

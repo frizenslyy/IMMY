@@ -7,7 +7,7 @@ from .ai import BotAI
 from .artifacts import NATURE_LABEL, artifact_buffs
 from .background import MAPS, draw_hero_icon, trap_phase
 from .config import (COMBO_KB, COMBO_MULT, COL_BLOOD, COL_DEEPRED, COL_DARK, COL_FRAME, COL_GEM, COL_GOLD,
-                     COL_ORANGE, COL_RED, COL_SAND, CRIT_MULT, DIALOG_INTRO_T, FATALITY_ANIM_T, FATALITY_BONUS,
+                     COL_ORANGE, COL_RED, COL_SAND, COUNTDOWN_T, CRIT_MULT, DIALOG_INTRO_T, FATALITY_ANIM_T, FATALITY_BONUS,
                      FATALITY_GEMS, FATALITY_KEYS, FATALITY_TXT, FATALITY_WINDOW, F_BIG, F_HUGE, F_MID,
                      F_SMALL, F_TINY, GROUND_Y, H, INJURY_CHANCE, LEGEND_FOE_HP, MARTYR_COIN_PER_DMG,
                      MARTYR_DMG_MULT, MARTYR_GEMS, MARTYR_HP_MULT, MARTYR_ROUNDS, MELEE_RANGE,
@@ -80,9 +80,11 @@ class Arena:
         self.wins_b = 0
         self.phase = "intro"
         self.phase_t = 1.6
+        self.fight_flash = 0.0
         self.p = Fighter(player_key, W * 0.32, 1,
                          buffs=None if self.net else artifact_buffs(player_key, self.equip))
-        pw = 1.0 if self.net else RARITY_POWER.get(HEROES[player_key]["rarity"], 1.0)
+        pw = 1.0 if self.net else HEROES[player_key].get("power",
+            RARITY_POWER.get(HEROES[player_key]["rarity"], 1.0))
         self.p.power = pw
         self.p.max_hp = 100.0 * pw
         self.p.hp = self.p.disp_hp = self.p.max_hp
@@ -127,7 +129,8 @@ class Arena:
         self.trap_cd = {"p": 0.0, "b": 0.0}
         self.say = None
         self.say_t = 0.0
-        self.set_say(dialogue.intro_line(boss), self.b)
+        if boss:
+            self.set_say(dialogue.intro_line(), self.b)
         if self.mirror:
             self.ai = None
 
@@ -150,10 +153,16 @@ class Arena:
             fighter.y = float(GROUND_Y)
             fighter.vx = fighter.vx_target = fighter.vy = fighter.kvx = 0.0
             fighter.facing = fc
-            fighter.hp = fighter.max_hp
-            fighter.disp_hp = fighter.max_hp
             fighter.dead = False
             fighter.dead_t = 0.0
+            if fighter is self.b and self.martyr:
+                keep = fighter.hp
+                if keep <= 0:
+                    keep = fighter.max_hp
+                fighter.hp = fighter.disp_hp = min(keep, fighter.max_hp)
+            else:
+                fighter.hp = fighter.max_hp
+                fighter.disp_hp = fighter.max_hp
             fighter.cds = [0.0] * len(fighter.h["abilities"])
             fighter.crouch = False
             fighter.on_ground = True
@@ -200,12 +209,12 @@ class Arena:
 
     def after_ko(self):
         if self.martyr:
-            if self.wins_p >= 2:
+            if self.wins_p >= 1:
                 self.win = True
                 self.martyr_gems = MARTYR_GEMS
                 self.phase = "end"
                 self.phase_t = 1e9
-            elif self.wins_b >= 2 or self.round >= MARTYR_ROUNDS:
+            elif self.wins_b >= 1 or self.round >= MARTYR_ROUNDS:
                 self.win = False
                 self.reward = int(self.dmg_dealt * MARTYR_COIN_PER_DMG)
                 self.phase = "end"
@@ -215,7 +224,8 @@ class Arena:
                 self.reset_round()
                 self.phase = "intro"
                 self.phase_t = 1.6
-                self.set_say(dialogue.pick(dialogue.ROUND2), self.b)
+                if self.boss:
+                    self.set_say(dialogue.pick(dialogue.ROUND2), self.b)
             return
         if self.survival:
             if self.p.dead:
@@ -375,6 +385,7 @@ class Arena:
         self.phase_t -= dt
         self.shake = max(0.0, self.shake - 40 * dt)
         self.combo_show = max(0.0, self.combo_show - dt)
+        self.fight_flash = max(0.0, getattr(self, "fight_flash", 0.0) - dt)
         if self.hitstop > 0:
             self.hitstop -= dt
             self.parts.update(dt * 0.15)
@@ -385,7 +396,19 @@ class Arena:
             return
         if self.phase == "intro":
             if self.phase_t <= 0:
+                self.phase = "count"
+                self.phase_t = COUNTDOWN_T
+            return
+        if self.phase == "count":
+            n = max(1, int(math.ceil(self.phase_t)))
+            if n != getattr(self, "count_last", None):
+                self.count_last = n
+                self.snd("combo")
+            if self.phase_t <= 0:
                 self.phase = "fight"
+                self.fight_flash = 0.9
+                self.count_last = None
+                self.snd("ult")
             return
         if self.phase == "end":
             return
@@ -466,7 +489,8 @@ class Arena:
             self.phase = "ko"
             self.phase_t = 1.8
             self.snd("ko")
-            self.set_say(dialogue.pick(dialogue.BOT_WIN), self.b)
+            if self.boss:
+                self.set_say(dialogue.pick(dialogue.BOT_WIN), self.b)
         elif b.hp <= 0 and not b.dead:
             b.dead = True
             self.wins_p += 1
@@ -476,7 +500,8 @@ class Arena:
             self.phase = "ko"
             self.phase_t = 1.8
             self.snd("ko")
-            self.set_say(dialogue.pick(dialogue.PLAYER_WIN), self.b)
+            if self.boss:
+                self.set_say(dialogue.pick(dialogue.PLAYER_WIN), self.b)
 
     def update_traps(self, dt):
         trap = self.map.get("trap")
@@ -650,7 +675,7 @@ class Arena:
         if res == "parry":
             if foe is self.p:
                 self.stats["parries"] += 1
-            else:
+            elif self.boss:
                 self.set_say(dialogue.pick(dialogue.TAUNT_ON_PARRY), foe)
             self.snd("parry")
             att.stun_t = max(att.stun_t, PARRY_STUN)
@@ -887,8 +912,8 @@ class Arena:
         f.cds[idx] = ab["cd"]
         if f is self.p:
             self.stats["casts"] += 1
-        else:
-            self.set_say(dialogue.pick(dialogue.BOSS_CAST if self.boss else dialogue.TAUNT_ON_CAST), f)
+        elif self.boss:
+            self.set_say(dialogue.pick(dialogue.BOSS_CAST), f)
         self.snd("cast")
         self.netfx(f.x, f.y - 90 * f.scale, f.h["glow"])
         return True
@@ -2077,6 +2102,32 @@ class Arena:
             cv.create_rectangle(W / 2 - 218, 642, W / 2 - 218 + int(436 * frac), 652,
                                 fill=COL_RED if frac < 0.35 else COL_GOLD, outline="", tags=("dyn",))
 
+    def draw_countdown(self, cv):
+        t = max(0.0, self.phase_t)
+        n = max(1, int(math.ceil(t)))
+        frac = t - (n - 1)
+        pulse = 1.0 + 0.28 * max(0.0, 1.0 - frac * 3.0)
+        col = {3: "#ffd23f", 2: "#ff8c1a", 1: "#ff2a14"}.get(n, COL_GOLD)
+        size = max(24, int(150 * pulse))
+        font = ("Courier", size, "bold")
+        jx = int(math.sin(t * 21) * 3 * (1.0 - frac))
+        cv.create_text(W / 2 + jx + 6, 336, text=str(n), font=font, fill="#2a0503", tags=("dyn",))
+        cv.create_text(W / 2 + jx, 330, text=str(n), font=font, fill=col, tags=("dyn",))
+        cv.create_text(W / 2 + jx, 330, text=str(n), font=font, fill="#ffffff",
+                       tags=("dyn",), stipple="gray12")
+        bw = 300
+        cv.create_rectangle(W / 2 - bw, 420, W / 2 - bw + 2 * bw * (t / COUNTDOWN_T), 432,
+                            fill=col, outline="", tags=("dyn",))
+        cv.create_rectangle(W / 2 - bw, 420, W / 2 + bw, 432, outline="#5a1c10", width=2, tags=("dyn",))
+
+    def draw_fight_flash(self, cv):
+        p = 1.0 - self.fight_flash / 0.9
+        size = max(30, int(110 + 70 * p))
+        font = ("Courier", size, "bold")
+        cv.create_text(W / 2 + 5, 325, text="БОЙ!", font=font, fill="#2a0503", tags=("dyn",))
+        cv.create_text(W / 2, 320, text="БОЙ!", font=font, fill=COL_RED, tags=("dyn",))
+        cv.create_text(W / 2, 320, text="БОЙ!", font=font, fill="#ffd23f", tags=("dyn",), stipple="gray25")
+
     def draw_dialogue(self, cv):
         if not self.say or self.say_t <= 0:
             return
@@ -2130,15 +2181,15 @@ class Arena:
             cv.create_rectangle(0, 0, W, H, fill="#1a0a2a", stipple="gray25", outline="", tags=("dyn",))
 
         if self.phase == "intro":
-            if self.survival:
-                txt = ("ВОЛНА %d" % self.wave) if self.phase_t > 0.6 else "БОЙ!"
-            else:
-                txt = "РАУНД %d" % self.round if self.phase_t > 0.6 else "БОЙ!"
-            col = COL_GOLD if self.phase_t > 0.6 else COL_RED
-            self.banner(cv, txt, col)
+            txt = "ВОЛНА %d" % self.wave if self.survival else "РАУНД %d" % self.round
+            self.banner(cv, txt, COL_GOLD)
             self.draw_dialogue(cv)
+        elif self.phase == "count":
+            self.draw_countdown(cv)
         elif self.phase == "ko":
             self.banner(cv, "НОКАУТ!", COL_RED)
+        elif self.phase == "fight" and self.fight_flash > 0 and int(self.fight_flash * 8) % 2 == 0:
+            self.draw_fight_flash(cv)
         elif self.phase == "fatality":
             cv.create_rectangle(0, 0, W, H, fill="#050101", stipple="gray50", outline="", tags=("dyn",))
             self.banner(cv, "ФАТАЛИТИ", COL_RED)

@@ -132,9 +132,21 @@ def draw_hero_icon(cv, key, x, y, size, border=True):
                         fill=hero["accent"], outline="", tags=("dyn",))
     cv.create_rectangle(x + size * 0.16, y + size * 0.58, x + size * 0.84, y + size * 0.95,
                         fill=hero["body2"], outline="", tags=("dyn",))
+    cv.create_rectangle(x + size * 0.16, y + size * 0.88, x + size * 0.84, y + size * 0.95,
+                        fill="#101010", outline="", tags=("dyn",))
+    cv.create_rectangle(x + size * 0.44, y + size * 0.63, x + size * 0.56, y + size * 0.73,
+                        fill=hero["accent"], outline="", tags=("dyn",))
+    cv.create_rectangle(x + size * 0.12, y + size * 0.56, x + size * 0.24, y + size * 0.66,
+                        fill=hero["accent"], outline="", tags=("dyn",))
+    cv.create_rectangle(x + size * 0.76, y + size * 0.56, x + size * 0.88, y + size * 0.66,
+                        fill=hero["accent"], outline="", tags=("dyn",))
     if hero["style"] == "hood":
         cv.create_polygon(hx - 4, hy + hw, hx + hw + 4, hy + hw, hx + hw / 2, hy - 8,
                           fill=hero["body"], outline="", tags=("dyn",))
+        for hdx in (-2, hw + 2):
+            cv.create_polygon(hx + hdx, hy + hw * 0.5, hx + hdx + (3 if hdx > 0 else -3),
+                              hy + hw * 0.5, hx + hdx, hy - 4,
+                              fill=hero["bone"], outline="", tags=("dyn",))
     elif hero["style"] == "glow":
         cv.create_rectangle(hx - 4, hy - 4, hx + hw + 4, hy + hw + 4, outline=hero["glow"],
                             width=2, tags=("dyn",), stipple="gray50")
