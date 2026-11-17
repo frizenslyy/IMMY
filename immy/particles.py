@@ -84,6 +84,26 @@ class Particles:
                                "color": random.choice((COL_BLOOD, "#8a0e08", "#5a1c10")),
                                "r": random.uniform(3, 7), "g": 1100})
 
+    def splat(self, x, y, n=6):
+        n = self._room(n)
+        for _ in range(n):
+            self.items.append({"kind": "splat", "x": x + random.uniform(-48, 48),
+                               "y": y + random.uniform(-2, 6), "vx": 0, "vy": 0, "g": 0,
+                               "t": random.uniform(4.0, 7.0), "life": 7.0,
+                               "color": random.choice((COL_BLOOD, "#8a0e08", "#5a0a06")),
+                               "r": random.uniform(2.5, 6.5)})
+
+    def bone(self, x, y, n=8):
+        n = self._room(n)
+        for _ in range(n):
+            self.items.append({"kind": "bone", "x": x, "y": y,
+                               "vx": random.uniform(-240, 240), "vy": random.uniform(-400, -140),
+                               "t": random.uniform(0.5, 0.9), "life": 0.9,
+                               "color": "#f2ead8", "r": random.uniform(3, 6), "g": 1000})
+        if self._room(1):
+            self.items.append({"kind": "crack", "x": x, "y": y, "vx": 0, "vy": 0, "g": 0,
+                               "t": 0.55, "life": 0.55, "color": "#f2ead8", "r": 10, "r1": 64})
+
     def dmg_text(self, x, y, n, color=COL_GOLD, big=False, txt=None):
         if not self._room(1):
             return
@@ -120,6 +140,32 @@ class Particles:
                 r = q["r"] * max(0.4, q["t"] / q["life"])
                 cv.create_rectangle(q["x"] - r + ox, q["y"] - r + oy, q["x"] + r + ox, q["y"] + r * 0.7 + oy,
                                     fill=q["color"], outline="", tags=("dyn",))
+            elif q.get("kind") == "splat":
+                a = max(0.0, min(1.0, q["t"] / 2.0))
+                if a <= 0.05:
+                    continue
+                r = q["r"] * (0.7 + 0.3 * a)
+                col = q["color"] if a > 0.5 else "#3a0604"
+                cv.create_oval(q["x"] - r + ox, q["y"] - r * 0.35 + oy, q["x"] + r + ox, q["y"] + r * 0.35 + oy,
+                               fill=col, outline="", tags=("dyn",), stipple="gray50" if a < 0.9 else "gray75")
+            elif q.get("kind") == "bone":
+                r = q["r"] * max(0.4, q["t"] / q["life"])
+                cv.create_line(q["x"] - r + ox, q["y"] + oy, q["x"] + r + ox, q["y"] - r * 0.6 + oy,
+                               fill=q["color"], width=3, tags=("dyn",))
+                cv.create_oval(q["x"] + r + ox - 2, q["y"] - r * 0.6 + oy - 2,
+                               q["x"] + r + ox + 2, q["y"] - r * 0.6 + oy + 2,
+                               fill=q["color"], outline="", tags=("dyn",))
+                cv.create_oval(q["x"] - r + ox - 2, q["y"] + oy - 2, q["x"] - r + ox + 2, q["y"] + oy + 2,
+                               fill=q["color"], outline="", tags=("dyn",))
+            elif q.get("kind") == "crack":
+                k = 1.0 - q["t"] / q["life"]
+                n = 7
+                for i in range(n):
+                    a = i * math.tau / n + 0.4
+                    r0 = q["r"] + (q["r1"] - q["r"]) * k
+                    cv.create_line(q["x"] + ox, q["y"] + oy,
+                                   q["x"] + math.cos(a) * r0 + ox, q["y"] + math.sin(a) * r0 * 0.7 + oy,
+                                   fill=q["color"], width=2, tags=("dyn",), stipple="gray50")
             else:
                 r = q["r"] * max(0.35, q["t"] / q["life"])
                 cv.create_oval(q["x"] - r + ox, q["y"] - r + oy, q["x"] + r + ox, q["y"] + r + oy,
