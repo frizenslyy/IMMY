@@ -5,7 +5,9 @@
 """
 
 import random
+import socket
 import tempfile
+import time
 
 import immy.save as save_mod
 from immy import achievements as ach_mod
@@ -619,6 +621,125 @@ def main():
         data = _render_track(*TRACKS[name])
         assert data[:4] == b"RIFF" and len(data) > 10000
     print("music tracks render ok")
+
+    from immy.config import (FATALITY_BONUS, FATALITY_GEMS, NET_DISCOVER_PORT,
+                             RARITY_POWER)
+    from immy import netplay
+
+    a = Arena("TITANY", "DEADY", 1, False)
+    assert abs(a.p.max_hp - 100.0 * RARITY_POWER["mythic"]) < 1e-6, a.p.max_hp
+    assert abs(a.p.dmg_mult - 1.1 * RARITY_POWER["mythic"]) < 1e-6
+    an = Arena("TITANY", "DEADY", 1, False, net=True)
+    assert an.p.max_hp == 100.0 and abs(an.p.dmg_mult - 1.1) < 1e-6
+    am = Arena("DEADY", "TITANY", 1, False, net=True, mirror=True)
+    assert am.mirror and am.ai is None and am.p.max_hp == 100.0
+    astd = Arena("DEADY", "TITANY", 1, False)
+    assert astd.p.max_hp == 100.0
+    print("rarity power scaling ok")
+
+    a = Arena("DEADY", "EMBERY", 10, True)
+    a.wins_p = 2
+    a.after_ko()
+    assert a.phase == "fatality" and a.fatality is not None
+    assert len(a.fatality["seq"]) == 4
+    a.fatality_feed(["x"])
+    a.update(0.016, dict(EMPTY_INP))
+    assert a.phase == "fatality"
+    a.fatality_feed(list(a.fatality["seq"]))
+    a.update(0.016, dict(EMPTY_INP))
+    assert a.phase == "fatality_anim", a.phase
+    assert a.fatality_done and a.fatality_bonus == FATALITY_BONUS and a.fatality_gems == FATALITY_GEMS
+    a.update(3.0, dict(EMPTY_INP))
+    assert a.phase == "end"
+    snap = a.snapshot()
+    assert snap["ph"] == "end" and snap["fd"] and snap["win"]
+
+    a2 = Arena("DEADY", "EMBERY", 10, True)
+    a2.wins_p = 2
+    a2.after_ko()
+    a2.update(6.0, dict(EMPTY_INP))
+    assert a2.phase == "end" and not a2.fatality_done and a2.fatality_bonus == 0
+
+    a3 = Arena("DEADY", "EMBERY", 1, False)
+    a3.wins_p = 2
+    a3.after_ko()
+    assert a3.phase == "end", a3.phase
+    print("fatality flow ok")
+
+    h = netplay.Host()
+    assert h.alive and not h.connected
+    c = netplay.Client()
+    assert c.connect("127.0.0.1")
+    for _ in range(50):
+        h.poll()
+        if h.connected:
+            break
+        time.sleep(0.02)
+    assert h.connected, "host accept failed"
+    assert c.send({"t": "hello", "name": "tester"})
+    assert c.send({"t": "in", "d": {"move": 1}})
+    for _ in range(50):
+        msgs = h.poll()
+        if msgs:
+            break
+        time.sleep(0.02)
+    assert any(m.get("t") == "hello" for m in msgs)
+    assert any(m.get("t") == "in" and m["d"]["move"] == 1 for m in msgs)
+    assert h.send({"t": "snap", "ph": "intro"})
+    for _ in range(50):
+        msgs = c.poll()
+        if msgs:
+            break
+        time.sleep(0.02)
+    assert any(m.get("t") == "snap" and m["ph"] == "intro" for m in msgs)
+    h.close()
+    c.close()
+    print("netplay loopback ok")
+
+    h = netplay.Host()
+    c = netplay.Client()
+    assert c.connect("127.0.0.1")
+    for _ in range(50):
+        h.poll()
+        if h.connected:
+            break
+        time.sleep(0.02)
+    assert h.connected
+    ah = Arena("DEADY", "LIGHTY", 1, False, map=MAPS[0], net=True)
+    am = Arena("LIGHTY", "DEADY", 1, False, map=MAPS[0], net=True, mirror=True)
+    for i in range(300):
+        for m in c.poll():
+            if m.get("t") == "snap":
+                am.pending_snap = m
+        for m in h.poll():
+            if m.get("t") == "in" and isinstance(m.get("d"), dict):
+                ah.remote_inp = m["d"]
+        ah.update(1 / 60, dict(EMPTY_INP, attack=(i % 10 == 0),
+                               move=1 if i % 80 < 40 else -1))
+        if i % 3 == 0:
+            assert h.send(ah.snapshot())
+        assert c.send({"t": "in", "d": dict(EMPTY_INP, move=-1 if i % 60 < 30 else 1,
+                                            attack=(i % 12 == 0))})
+        am.update(1 / 60, dict(EMPTY_INP))
+        if ah.phase == "end":
+            break
+    assert am.p.synced and am.b.synced
+    assert abs(am.p.x - ah.p.x) < 90, (am.p.x, ah.p.x)
+    assert abs(am.p.hp - ah.p.hp) < 0.6, (am.p.hp, ah.p.hp)
+    assert am.phase == ah.phase, (am.phase, ah.phase)
+    h.close()
+    c.close()
+    print("netplay e2e mirror ok")
+
+    disc = netplay.Discovery()
+    fake = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    fake.sendto((netplay.ANS + "deadbeef|TESTPC").encode(), ("127.0.0.1", NET_DISCOVER_PORT))
+    time.sleep(0.15)
+    peers = disc.scan()
+    fake.close()
+    disc.close()
+    assert any(name == "TESTPC" for _, name in peers), peers
+    print("discovery ok")
 
     print("SELFTEST OK")
 

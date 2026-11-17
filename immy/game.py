@@ -5,14 +5,15 @@ import random
 import time
 import tkinter as tk
 
-from . import achievements, campaign
+from . import achievements, campaign, netplay
 from .arena import Arena
 from .background import (MAPS, draw_ambient, draw_fight_bg, draw_hero_icon,
                          draw_menu_bg, draw_screen_bg, draw_torches)
 from .config import (CHEST_COST, COL_BLOOD, COL_GEM, COL_GOLD, COL_ORANGE,
-                     COL_RED, COL_SAND, FINISHER_BONUS, F_BIG, F_HUGE, F_MID,
-                     F_SMALL, F_SQUARE, F_TINY, GROUND_Y, H, TICK_MS, TITLE,
-                     W, exp_to_next)
+                     COL_RED, COL_SAND, FATALITY_BONUS, FATALITY_GEMS,
+                     FATALITY_KEYS, FINISHER_BONUS, F_BIG, F_HUGE, F_MID,
+                     F_SMALL, F_SQUARE, F_TINY, FPS, GROUND_Y, H,
+                     NET_SNAP_HZ, RARITY_POWER, TICK_MS, TITLE, W, exp_to_next)
 from .fighter import Fighter
 from .heroes import HEROES, RARITY_COLOR, RARITY_LABEL, STAT_NAMES
 from .particles import Embers, Particles
@@ -54,6 +55,9 @@ INFO_MECH = [
     ("Каждые 10 уровней бота — БОСС: двойные монеты, огромная сила", COL_RED),
     ("У каждого героя есть плюсы и минусы — играй от сильных сторон", COL_GOLD),
     ("В умелых руках даже НЕОБЫЧНЫЙ герой побеждает ЭПИЧЕСКОГО", COL_GEM),
+    ("СИЛА РЕДКОСТИ (против бота): НЕОБЫЧНЫЙ +6% · ЭКСКЛЮЗИВНЫЙ +10% · ЭПИЧЕСКИЙ +13% · МИФИЧЕСКИЙ +20% · DEVILY +28%", COL_GOLD),
+    ("ФАТАЛИТИ: после победы над БОССОМ и в бою с другом экран темнеет — успей набрать комбо: +%d монет и +%d самоцвета" % (FATALITY_BONUS, FATALITY_GEMS), COL_RED),
+    ("FRIEND: бой с другом по локальной сети — система находит компьютеры сам, сила всех героев равна", COL_SAND),
 ]
 
 
@@ -121,6 +125,17 @@ class Game(tk.Tk):
         self.camp_idx = 0
         self.camp_ctx = None
         self.ach_page = 0
+        self.net_role = None
+        self.net = None
+        self.net_host = None
+        self.disc = None
+        self.net_peers = []
+        self.net_my_pick = None
+        self.net_foe_pick = None
+        self.net_peer_name = ""
+        self.net_msg = ""
+        self.net_map = 0
+        self._snap_n = 0
         self.last = time.time()
         self.bind("<KeyPress>", self.on_key)
         self.bind("<KeyRelease>", self.on_key_release)
@@ -222,6 +237,51 @@ class Game(tk.Tk):
         self.ach_page = 0
         self.set_state("achievements")
 
+    def goto_net(self):
+        self.leave_net_soft()
+        self.net_msg = ""
+        self.net_peers = []
+        self.disc = netplay.Discovery()
+        self.net_host = netplay.Host()
+        if not self.net_host.alive:
+            self.net_msg = "ХОСТ-ПОРТ ЗАНЯТ: ВЫ СМОЖЕТЕ ТОЛЬКО ПОДКЛЮЧАТЬСЯ"
+        self.set_state("net_scan")
+        self.net_peers = self.disc.scan()
+
+    def leave_net(self):
+        if self.net is not None:
+            self.net.send({"t": "leave"})
+            self.net.close()
+            self.net = None
+        self.leave_net_soft()
+        self.net_role = None
+        self.net_my_pick = None
+        self.net_foe_pick = None
+        self.net_peer_name = ""
+        self.net_peers = []
+
+    def net_connect(self, ip, name):
+        client = netplay.Client()
+        if not client.connect(ip):
+            self.net_msg = "НЕ УДАЛОСЬ ПОДКЛЮЧИТЬСЯ К %s" % name
+            return
+        self.leave_net_soft()
+        self.net = client
+        self.net_role = "client"
+        self.net_peer_name = name
+        self.net.send({"t": "hello", "name": netplay.host_name()})
+        self.net_my_pick = None
+        self.net_foe_pick = None
+        self.set_state("net_select")
+
+    def leave_net_soft(self):
+        if self.disc is not None:
+            self.disc.close()
+            self.disc = None
+        if isinstance(getattr(self, "net_host", None), netplay.Host):
+            self.net_host.close()
+        self.net_host = None
+
     def pick_hero(self, key):
         self.hero_sel = key
         if self.state in ("heroes", "select"):
@@ -309,12 +369,20 @@ class Game(tk.Tk):
     def on_key(self, e):
         k = norm_key(e)
         if k == "escape":
+            if self.state in ("net_scan", "net_select") or (self.state == "fight"
+                                                            and self.arena is not None and self.arena.net):
+                self.leave_net()
+                self.arena = None
             if self.state != "menu":
                 self.set_state("menu")
             return
         if k == "m" and k not in self.keys:
             self.music.toggle()
         if self.state == "fight":
+            if self.arena is not None and self.arena.phase == "fatality":
+                if k in FATALITY_KEYS:
+                    self.events.add(k)
+                return
             if k == "w":
                 self.events.add("jump")
             elif k == "f":
@@ -340,6 +408,8 @@ class Game(tk.Tk):
                     if x0 <= e.x <= x1 and y0 <= e.y <= y1:
                         action()
                         return
+            elif self.arena.phase == "fatality":
+                self.events.add("attack")
             elif self.arena.phase == "fight":
                 self.events.add("attack")
             return
@@ -401,6 +471,18 @@ class Game(tk.Tk):
 
     def loop_body(self, dt):
         self.embers.update(dt)
+        if self.state == "net_scan":
+            if isinstance(self.net_host, netplay.Host) and self.net_host.connected:
+                self.net = self.net_host
+                self.net_role = "host"
+                self.net_peer_name = ""
+                self.net_my_pick = None
+                self.net_foe_pick = None
+                self.set_state("net_select")
+            if self.disc is None:
+                self.net_back()
+        elif self.state == "net_select":
+            self.net_poll_select()
         if self.state in ("heroes", "select") and self.preview is not None:
             self.preview.anim_t += dt
             if random.random() < dt * 4:
@@ -422,17 +504,94 @@ class Game(tk.Tk):
                                              "r": 3.0, "g": 300})
             self.parts.update(dt)
         if self.state == "fight" and self.arena is not None:
-            inp = self.build_input()
-            self.arena.update(dt, inp)
-            if self.arena.phase == "end" and not self.arena.rewarded:
-                self.finish_fight()
+            if self.arena.mirror:
+                self.net_mirror_frame(dt)
+                if self.state == "fight" and self.arena is not None and self.arena.mirror:
+                    if self.arena.phase == "fatality":
+                        ev = [k for k in self.events if k in FATALITY_KEYS]
+                        if ev:
+                            self.net.send({"t": "fat", "ev": ev})
+                    inp = self.build_input()
+                    self.net.send({"t": "in", "d": inp})
+                    if self.arena.phase == "end" and not self.arena.rewarded:
+                        self.finish_fight()
+            else:
+                if self.arena.phase == "fatality" and (not self.arena.net or self.arena.win):
+                    self.arena.fatality_feed(k for k in self.events if k in FATALITY_KEYS)
+                if self.arena.net:
+                    self.net_host_frame(dt)
+                    if self.arena is None or self.state != "fight":
+                        return
+                inp = self.build_input()
+                self.arena.update(dt, inp)
+                if self.arena.net:
+                    self._snap_n += 1
+                    if self._snap_n % max(1, FPS // NET_SNAP_HZ) == 0:
+                        self.net.send(self.arena.snapshot())
+                if self.arena.phase == "end" and not self.arena.rewarded:
+                    self.finish_fight()
         self.draw()
+
+    def net_host_frame(self, dt):
+        last_in = None
+        for msg in self.net.poll():
+            t = msg.get("t")
+            if t == "in":
+                last_in = msg.get("d")
+            elif t == "fat":
+                self.arena.fatality_feed(msg.get("ev", ()))
+            elif t == "leave":
+                self.net_dropped("Друг покинул бой")
+                return
+        if last_in is not None and isinstance(last_in, dict) and {
+                "move", "jump", "crouch", "attack", "cast"} <= last_in.keys():
+            self.arena.remote_inp = last_in
+
+    def net_mirror_frame(self, dt):
+        dropped = False
+        for msg in self.net.poll():
+            t = msg.get("t")
+            if t == "snap":
+                self.arena.pending_snap = msg
+            elif t == "start":
+                self.net_start_from_host(msg)
+                return
+            elif t == "leave":
+                dropped = True
+        if dropped or not self.net.connected:
+            self.net_dropped("Соединение потеряно")
+
+    def net_dropped(self, why):
+        self.leave_net()
+        self.arena = None
+        self.set_state("menu")
+        self.toasts.append((why, "", time.time() + 4.0))
+
+    def net_start_from_host(self, msg):
+        self.net_map = msg.get("map", 0)
+        h1, h2 = msg.get("h1"), msg.get("h2")
+        if h1 not in HEROES or h2 not in HEROES:
+            self.net_dropped("Некорректный выбор героя")
+            return
+        self.start_net_fight(h2, h1, self.net_map, mirror=True)
 
     def finish_fight(self):
         a = self.arena
         a.rewarded = True
         st = self.save["stats"]
         exp_gain = 0
+        if a.net:
+            exp_gain = 30 if a.win else 12
+            if a.fatality_done and a.win:
+                st["fatalities"] = st.get("fatalities", 0) + 1
+            if a.fatality_gems:
+                self.earn_gems(a.fatality_gems)
+            if a.reward:
+                self.earn(a.reward)
+            a.exp_gain = exp_gain
+            self.add_exp(exp_gain)
+            self.persist()
+            return
         if a.survival:
             waves = max(0, a.wave - 1)
             exp_gain = 10 * waves + max(0, waves - 3) * 5
@@ -450,6 +609,10 @@ class Game(tk.Tk):
                 a.finish_bonus = FINISHER_BONUS * a.quality_finish
                 a.reward += a.finish_bonus
                 exp_gain += FINISHER_BONUS * a.quality_finish
+        if a.fatality_done and a.win:
+            st["fatalities"] = st.get("fatalities", 0) + 1
+        if a.fatality_gems:
+            self.earn_gems(a.fatality_gems)
         a.exp_gain = exp_gain
         st["specials"] += a.stats["specials"]
         st["ults"] += a.stats["ults"]
@@ -524,12 +687,13 @@ class Game(tk.Tk):
     def draw_menu(self):
         cv = self.cv
         cx = W // 2
-        self.ui.button(cv, cx - 110, 300, cx + 110, 500, "PLAY", self.goto_mode, font=F_SQUARE)
-        self.ui.button(cv, cx - 160, 540, cx + 160, 600, "HEROES", self.goto_heroes, font=F_MID)
-        self.ui.button(cv, cx - 160, 610, cx + 160, 670, "CAMPAIGN", self.goto_campaigns, font=F_MID)
-        self.ui.button(cv, cx - 160, 680, cx + 160, 740, "SHOP", self.goto_shop, font=F_MID)
-        self.ui.button(cv, cx - 160, 750, cx + 160, 800, "INFO", self.goto_info, font=F_SMALL)
-        self.ui.button(cv, cx - 160, 810, cx + 160, 860, "AWARDS", self.goto_achievements, font=F_SMALL)
+        self.ui.button(cv, cx - 110, 300, cx + 110, 490, "PLAY", self.goto_mode, font=F_SQUARE)
+        self.ui.button(cv, cx - 160, 500, cx + 160, 556, "HEROES", self.goto_heroes, font=F_MID)
+        self.ui.button(cv, cx - 160, 560, cx + 160, 616, "FRIEND", self.goto_net, font=F_MID)
+        self.ui.button(cv, cx - 160, 620, cx + 160, 676, "CAMPAIGN", self.goto_campaigns, font=F_MID)
+        self.ui.button(cv, cx - 160, 680, cx + 160, 736, "SHOP", self.goto_shop, font=F_MID)
+        self.ui.button(cv, cx - 160, 740, cx + 160, 796, "INFO", self.goto_info, font=F_SMALL)
+        self.ui.button(cv, cx - 160, 800, cx + 160, 856, "AWARDS", self.goto_achievements, font=F_SMALL)
         self.ui.coins(cv, 30, H - 40, self.coins)
         self.ui.gems(cv, 240, H - 40, self.gems)
         self.draw_level_bar(cv, 30, 24)
@@ -558,6 +722,166 @@ class Game(tk.Tk):
         self.ui.coins(cv, W / 2 - 90, 700, self.coins)
         self.ui.gems(cv, W / 2 + 60, 700, self.gems)
         self.ui.button(cv, 24, 24, 150, 70, "НАЗАД", self.goto_menu, font=F_SMALL)
+
+    def draw_net_scan(self):
+        cv = self.cv
+        cx = W // 2
+        cv.create_text(cx + 3, 93, text="FRIEND · LAN", font=F_BIG, fill="#2a0503", tags=("dyn",))
+        cv.create_text(cx, 90, text="FRIEND · LAN", font=F_BIG, fill=COL_GOLD, tags=("dyn",))
+        cv.create_text(cx, 136, text="БОЙ С ДРУГОМ ПО ЛОКАЛЬНОЙ СЕТИ · ПОЛНЫЙ БАЛАНС", fill=COL_ORANGE,
+                       font=F_SMALL, tags=("dyn",))
+        cv.create_text(cx, 162, text="Ваш компьютер: %s%s" % (netplay.host_name(),
+                       "" if (self.disc and self.disc.hosting) else " · режим подключения"),
+                       fill=COL_SAND, font=F_TINY, tags=("dyn",))
+        cv.create_rectangle(cx - 340, 190, cx + 340, 700, fill="#1a0908", outline="#5a1c10",
+                            width=2, tags=("dyn",))
+        cv.create_text(cx, 216, text="КОМПЬЮТЕРЫ В СЕТИ", fill=COL_ORANGE, font=F_MID, tags=("dyn",))
+        if not self.net_peers:
+            cv.create_text(cx, 300, text="ПОКА НИКОГО НЕ НАЙДЕНО...", fill="#8a4a20", font=F_SMALL, tags=("dyn",))
+            cv.create_text(cx, 330, text="Друг должен запустить IMMY и открыть вкладку FRIEND", fill=COL_SAND,
+                           font=F_TINY, tags=("dyn",))
+        for i, (ip, name) in enumerate(self.net_peers[:10]):
+            y0 = 250 + i * 44
+            self.ui.button(cv, cx - 300, y0, cx + 300, y0 + 38, "%s · %s" % (name, ip),
+                           lambda ip=ip, name=name: self.net_connect(ip, name), font=F_SMALL)
+        cv.create_text(cx, 730, text=self.net_msg, fill=COL_RED if "НЕ" in self.net_msg else COL_GEM,
+                       font=F_SMALL, tags=("dyn",))
+        self.ui.button(cv, cx - 160, 760, cx + 160, 810, "ОБНОВИТЬ", self.net_refresh, font=F_SMALL)
+        self.ui.button(cv, 24, 24, 150, 70, "НАЗАД", self.net_back, font=F_SMALL)
+
+    def net_refresh(self):
+        if self.disc is not None:
+            self.net_peers = self.disc.scan()
+            self.net_msg = ""
+
+    def net_back(self):
+        self.leave_net()
+        self.arena = None
+        self.set_state("menu")
+
+    def draw_net_select(self):
+        cv = self.cv
+        sel = self.net_my_pick or self.hero_sel
+        keys = list(HEROES)
+        cv.create_rectangle(24, 100, 560, 860, fill="#1a0908", outline="#5a1c10", width=2, tags=("dyn",))
+        cv.create_text(292, 122, text="ВСЕ БОЙЦЫ · БАЛАНС", fill=COL_ORANGE, font=F_MID, tags=("dyn"))
+        for i, key in enumerate(keys):
+            col, row = i % 4, i // 4
+            x0 = 34 + col * 130
+            y0 = 150 + row * 78
+            x1, y1 = x0 + 122, y0 + 70
+            my = key == self.net_my_pick
+            fo = key == self.net_foe_pick
+            rcol = RARITY_COLOR.get(HEROES[key]["rarity"], "#5a1c10")
+            cv.create_rectangle(x0, y0, x1, y1, fill="#2a0f0a" if my else "#200a08",
+                                outline=COL_GOLD if my else ("#ff2a8a" if fo else rcol),
+                                width=3 if (my or fo) else 2, tags=("dyn"))
+            draw_hero_icon(cv, key, x0 + 6, y0 + 6, 40)
+            cv.create_text(x0 + 54, y0 + 14, text=key, anchor="w", fill=COL_GOLD, font=F_TINY, tags=("dyn"))
+            cv.create_text(x0 + 54, y0 + 32, text=HEROES[key]["title"][:16], anchor="w", fill="#c9884a",
+                           font=F_TINY, tags=("dyn"))
+            if fo and not my:
+                cv.create_text(x1 - 6, y0 + 58, text="ВРАГ", anchor="e", fill="#ff2a8a", font=F_TINY, tags=("dyn"))
+            self.buttons.append((x0, y0, x1, y1, lambda k=key: self.net_pick(k)))
+
+        cx = 800
+        for j, (label, key, colr) in enumerate((("ВЫ", self.net_my_pick, COL_GOLD),
+                                                ("ВРАГ", self.net_foe_pick, "#ff2a8a"))):
+            bx = cx - 210 + j * 220
+            cv.create_rectangle(bx - 95, 130, bx + 95, 430, fill="#1a0908",
+                                outline=colr if key else "#5a1c10", width=3, tags=("dyn"))
+            cv.create_text(bx, 156, text=label, fill=colr, font=F_MID, tags=("dyn"))
+            if key:
+                draw_hero_icon(cv, key, bx - 60, 190, 120, border=False)
+                cv.create_text(bx, 350, text=HEROES[key]["name"], fill=COL_GOLD, font=F_SMALL, tags=("dyn"))
+                rar = RARITY_LABEL.get(HEROES[key]["rarity"], "")
+                cv.create_text(bx, 376, text=rar, fill=RARITY_COLOR.get(HEROES[key]["rarity"], COL_SAND),
+                               font=F_TINY, tags=("dyn"))
+                cv.create_text(bx, 402, text="СИЛА: БАЛАНС 1.00", fill=COL_SAND, font=F_TINY, tags=("dyn"))
+            else:
+                cv.create_text(bx, 280, text="ВЫБОР...", fill="#8a4a20", font=F_SMALL, tags=("dyn"))
+        cv.create_text(cx, 470, text="В битве с другом сила редкости отключена — решают механики и комбо",
+                       fill=COL_GEM, font=F_TINY, tags=("dyn"))
+
+        hero = HEROES[sel]
+        cv.create_rectangle(1040, 100, 1576, 860, fill="#1a0908", outline="#5a1c10", width=2, tags=("dyn"))
+        cv.create_text(1308, 132, text=sel, fill=COL_GOLD, font=F_BIG, tags=("dyn"))
+        cv.create_text(1308, 162, text=hero["title"], fill="#ff5a1a", font=F_SMALL, tags=("dyn"))
+        cv.create_text(1308, 184, text="ДРУЖЕСКИЙ БОЙ · СИЛА 1.00", fill=COL_GEM, font=F_TINY, tags=("dyn"))
+        cv.create_text(1308, 216, text=hero["desc"], fill="#e8c9a0", font=F_TINY, width=480, tags=("dyn"))
+        cv.create_text(1070, 272, text="СТАТЫ", anchor="w", fill=COL_ORANGE, font=F_SMALL, tags=("dyn"))
+        for j, (skey, sname, scol) in enumerate(STAT_NAMES):
+            val = hero["stats"][skey]
+            yy = 290 + j * 20
+            cv.create_text(1070, yy, text=sname, anchor="w", fill=COL_SAND, font=F_TINY, tags=("dyn"))
+            cv.create_rectangle(1150, yy - 5, 1490, yy + 5, fill="#160607", outline="#5a1c10",
+                                width=1, tags=("dyn"))
+            cv.create_rectangle(1150, yy - 5, 1150 + val * 24, yy + 5, fill=scol, outline="", tags=("dyn"))
+        cv.create_text(1070, 366, text="СПОСОБНОСТИ", anchor="w", fill=COL_ORANGE, font=F_SMALL, tags=("dyn"))
+        y = 386
+        for i, ab in enumerate(hero["abilities"]):
+            cv.create_text(1070, y, text="[%d] %s" % (i + 1, ab["name"]), anchor="w",
+                           fill=COL_GOLD, font=F_SMALL, tags=("dyn"))
+            cv.create_text(1560, y, text="%dс" % ab["cd"], anchor="e", fill="#ff5a1a", font=F_SMALL, tags=("dyn"))
+            cv.create_text(1076, y + 15, text=ab["desc"], anchor="w", fill=COL_SAND, font=F_TINY,
+                           width=470, tags=("dyn"))
+            y += 44
+        sps = hero.get("specials", ())
+        if sps:
+            cv.create_text(1070, y + 2, text="СПЕЦПРИЁМЫ", anchor="w", fill=COL_ORANGE, font=F_SMALL, tags=("dyn"))
+            for sp in sps:
+                y += 20
+                cv.create_text(1070, y, text="[%s] %s" % (sp["combo"].upper(), sp["name"]), anchor="w",
+                               fill="#ffd24a", font=F_SMALL, tags=("dyn"))
+
+        self.ui.button(cv, 24, 24, 150, 70, "НАЗАД", self.net_back, font=F_SMALL)
+        if self.net_role == "host":
+            ready = self.net_my_pick and self.net_foe_pick
+            if ready:
+                self.ui.button(cv, cx - 150, 830, cx + 150, 886, "В БОЙ!", self.net_start, font=F_BIG)
+            else:
+                cv.create_text(cx, 858, text="ОЖИДАНИЕ ВЫБОРА ОБОИХ ИГРОКОВ...", fill=COL_ORANGE,
+                               font=F_SMALL, tags=("dyn"))
+        else:
+            cv.create_text(cx, 858, text="Хост начинает бой..." if self.net_foe_pick else "Выберите бойца — хост начнёт бой",
+                           fill=COL_ORANGE, font=F_SMALL, tags=("dyn"))
+
+    def net_pick(self, key):
+        self.net_my_pick = key
+        self.hero_sel = key
+        if self.net is not None:
+            self.net.send({"t": "pick", "hero": key})
+
+    def net_poll_select(self):
+        if self.net is None or not self.net.connected:
+            self.net_dropped("Соединение потеряно")
+            return
+        for msg in self.net.poll():
+            t = msg.get("t")
+            if t == "hello":
+                self.net_peer_name = str(msg.get("name", ""))[:22]
+            elif t == "pick":
+                k = msg.get("hero")
+                if k in HEROES:
+                    self.net_foe_pick = k
+            elif t == "start":
+                self.net_start_from_host(msg)
+                return
+            elif t == "leave":
+                self.net_dropped("Друг покинул лобби")
+                return
+
+    def net_start(self):
+        if self.net_role != "host" or not self.net_my_pick or not self.net_foe_pick:
+            return
+        self.net_map = random.randrange(len(MAPS))
+        self.net.send({"t": "start", "map": self.net_map,
+                       "h1": self.net_my_pick, "h2": self.net_foe_pick})
+        self.start_net_fight(self.net_my_pick, self.net_foe_pick, self.net_map, mirror=False)
+
+    def start_net_fight(self, my, foe, map_idx, mirror):
+        self.arena = Arena(my, foe, 1, False, map=MAPS[map_idx % len(MAPS)], net=True, mirror=mirror)
+        self.set_state("fight")
 
     def draw_campaigns(self):
         cv = self.cv
@@ -696,7 +1020,7 @@ class Game(tk.Tk):
         else:
             cv.create_text(W / 2, 136, text="МЕХАНИКИ ИГРЫ", font=F_MID, fill=COL_ORANGE, tags=("dyn",))
             lines = INFO_MECH
-            step = 42
+            step = 36
         for i, (txt, colr) in enumerate(lines):
             cv.create_text(80, 180 + i * step, text=txt, anchor="w", font=F_SMALL,
                            fill=colr, tags=("dyn",))
@@ -755,7 +1079,10 @@ class Game(tk.Tk):
         rcol = RARITY_COLOR.get(hero["rarity"], COL_SAND)
         price_tag = "" if hero["price"] <= 0 else " · %d МОНЕТ" % hero["price"]
         cv.create_text(1358, 184, text=rar + price_tag, fill=rcol, font=F_TINY, tags=("dyn",))
-        cv.create_text(1358, 226, text=hero["desc"], fill="#e8c9a0", font=F_TINY, width=400, tags=("dyn",))
+        pw = RARITY_POWER.get(hero["rarity"], 1.0)
+        cv.create_text(1358, 204, text=("СИЛА: x%.2f (против бота)" % pw) if pw > 1.0 else "СИЛА: x1.00",
+                       fill=COL_GEM, font=F_TINY, tags=("dyn",))
+        cv.create_text(1358, 232, text=hero["desc"], fill="#e8c9a0", font=F_TINY, width=400, tags=("dyn"))
         cv.create_text(1170, 292, text="СТАТЫ", anchor="w", fill=COL_ORANGE, font=F_SMALL, tags=("dyn",))
         for j, (skey, sname, scol) in enumerate(STAT_NAMES):
             val = hero["stats"][skey]
@@ -979,14 +1306,24 @@ class Game(tk.Tk):
             self.draw_achievements()
         elif st == "chest_open":
             self.draw_chest_open()
+        elif st == "net_scan":
+            self.draw_net_scan()
+        elif st == "net_select":
+            self.draw_net_select()
         elif st == "fight":
             if self.arena is not None:
                 self.arena.draw(cv, self.coins + (self.arena.run_reward if self.arena.survival else 0))
                 draw_ambient(cv, time.time(), self.arena.map)
                 draw_torches(cv, time.time(), self.arena.map)
                 if self.arena.phase == "end":
-                    self.ui.button(cv, W / 2 - 280, 610, W / 2 - 40, 670, "РЕВАНШ", self.start_fight, font=F_SMALL)
-                    self.ui.button(cv, W / 2 + 40, 610, W / 2 + 280, 670, "В МЕНЮ", self.goto_menu, font=F_SMALL)
+                    if self.arena.net and self.arena.mirror:
+                        self.ui.button(cv, W / 2 - 120, 610, W / 2 + 120, 670, "В МЕНЮ", self.net_back, font=F_SMALL)
+                    elif self.arena.net:
+                        self.ui.button(cv, W / 2 - 280, 610, W / 2 - 40, 670, "РЕВАНШ", self.net_start, font=F_SMALL)
+                        self.ui.button(cv, W / 2 + 40, 610, W / 2 + 280, 670, "В МЕНЮ", self.net_back, font=F_SMALL)
+                    else:
+                        self.ui.button(cv, W / 2 - 280, 610, W / 2 - 40, 670, "РЕВАНШ", self.start_fight, font=F_SMALL)
+                        self.ui.button(cv, W / 2 + 40, 610, W / 2 + 280, 670, "В МЕНЮ", self.goto_menu, font=F_SMALL)
         self.draw_toasts(cv)
 
 

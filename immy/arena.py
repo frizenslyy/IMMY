@@ -6,20 +6,48 @@ import random
 from .ai import BotAI
 from .background import MAPS, draw_hero_icon
 from .config import (COMBO_KB, COMBO_MULT, COL_BLOOD, COL_DEEPRED, COL_DARK, COL_FRAME, COL_GEM, COL_GOLD,
-                     COL_ORANGE, COL_RED, COL_SAND, CRIT_MULT, F_BIG, F_HUGE, F_MID, F_SMALL, F_TINY,
-                     GROUND_Y, H, INJURY_CHANCE, MELEE_RANGE, MYTH_ENERGY, MYTH_FOE_HP, PARRY_CD,
-                     PARRY_STUN, ULT_HP, ULT_LEFT, ULT_QUALITY, ULT_RANGE_Y, W, WALL)
-from .fighter import STRIKE_KINDS, Fighter
+                     COL_ORANGE, COL_RED, COL_SAND, CRIT_MULT, FATALITY_ANIM_T, FATALITY_BONUS,
+                     FATALITY_GEMS, FATALITY_KEYS, FATALITY_TXT, FATALITY_WINDOW, F_BIG, F_HUGE, F_MID,
+                     F_SMALL, F_TINY, GROUND_Y, H, INJURY_CHANCE, MELEE_RANGE, MYTH_ENERGY, MYTH_FOE_HP,
+                     PARRY_CD, PARRY_STUN, RARITY_POWER, ULT_HP, ULT_LEFT, ULT_QUALITY, ULT_RANGE_Y, W, WALL)
+from .fighter import Fighter
 from .heroes import HEROES
 from .particles import Particles
 from .util import clamp
 
 
+def _snap_fighter(f):
+    return {"x": round(f.x, 1), "y": round(f.y, 1), "fc": f.facing, "cr": f.crouch, "gr": f.on_ground,
+            "hp": round(f.hp, 1), "mhp": round(f.max_hp, 1), "dh": round(f.disp_hp, 1),
+            "dd": f.dead, "dt": round(f.dead_t, 2), "at": round(f.attack_t, 3), "ak": f.attack_kind,
+            "st": round(f.stun_t, 3), "ht": round(f.hurt_t, 3), "hf": round(f.hit_flash, 3),
+            "en": round(f.energy, 1), "bf": {k: round(v, 2) for k, v in f.buffs.items()},
+            "cb": f.combo, "rt": round(f.root_t, 2), "sc": f.scythe_out,
+            "cds": [round(c, 2) for c in f.cds],
+            "spcd": {k: round(v, 2) for k, v in f.sp_cds.items()},
+            "stcd": {k: round(v, 2) for k, v in f.strike_cds.items()},
+            "pcd": round(f.parry_cd, 2), "pt": round(f.parry_t, 2),
+            "inj": f.injury["kind"] if f.injury else None,
+            "inja": f.injury["ability"] if f.injury else 0}
+
+
 class Arena:
-    def __init__(self, player_key, bot_key, level, boss, map=None, survival=False):
+    def __init__(self, player_key, bot_key, level, boss, map=None, survival=False, net=False, mirror=False):
         self.level = level
         self.boss = boss
         self.survival = survival
+        self.net = net or mirror
+        self.mirror = mirror
+        self.remote_inp = None
+        self.pending_snap = None
+        self.net_events = []
+        self.pending_fat = []
+        self.fatality = None
+        self.fatality_done = False
+        self.fatality_bonus = 0
+        self.fatality_gems = 0
+        self.fat_style = "plain"
+        self.fat_anim_t = 0.0
         self.wave = 1
         self.run_reward = 0
         self.mini = False
@@ -30,6 +58,11 @@ class Arena:
         self.phase = "intro"
         self.phase_t = 1.6
         self.p = Fighter(player_key, W * 0.32, 1)
+        pw = 1.0 if self.net else RARITY_POWER.get(HEROES[player_key]["rarity"], 1.0)
+        self.p.power = pw
+        self.p.max_hp = 100.0 * pw
+        self.p.hp = self.p.disp_hp = self.p.max_hp
+        self.p.dmg_mult = 1.1 * pw
         self.b = Fighter(bot_key, W * 0.68, -1, scale=1.35 if boss else 1.0)
         self.b.is_bot = True
         self.b.max_hp = 100.0 * (1 + level * 0.045) * (1.35 if boss else 1.0)
@@ -40,7 +73,6 @@ class Arena:
         self.b.reaction = max(0.18, 0.55 - level * 0.015)
         self.b.dmg_mult = self.b.base_dmg
         self.b.speed_mult = self.b.base_speed
-        self.p.dmg_mult = 1.1
         self.ai = BotAI(self.b, level)
         if survival:
             self.spawn_wave()
@@ -60,6 +92,8 @@ class Arena:
         self.reward = 0
         self.rewarded = False
         self.time = 0.0
+        if self.mirror:
+            self.ai = None
 
     def foe_of(self, f):
         return self.b if f is self.p else self.p
@@ -136,14 +170,104 @@ class Arena:
             return
         if self.wins_p >= 2 or self.wins_b >= 2:
             self.win = self.wins_p >= 2
-            self.reward = (100 if self.boss else 30) * max(1, self.level // 2 + 1)
-            self.phase = "end"
-            self.phase_t = 1e9
+            self.reward = 0 if self.net else (100 if self.boss else 30) * max(1, self.level // 2 + 1)
+            if self.net or (self.boss and self.win):
+                self.start_fatality()
+            else:
+                self.phase = "end"
+                self.phase_t = 1e9
         else:
             self.round += 1
             self.reset_round()
             self.phase = "intro"
             self.phase_t = 1.6
+
+    def start_fatality(self):
+        self.phase = "fatality"
+        self.phase_t = 1e9
+        seq = [random.choice(FATALITY_KEYS) for _ in range(4)]
+        self.fatality = {"seq": seq, "idx": 0, "t": FATALITY_WINDOW}
+        self.pending_fat = []
+        self.b.fatality_hide = False
+
+    def fatality_feed(self, tokens):
+        for tok in tokens:
+            if tok in FATALITY_KEYS:
+                self.pending_fat.append(tok)
+
+    def finish_fatality(self, ok):
+        self.fatality = None
+        self.pending_fat = []
+        if ok:
+            self.fatality_done = True
+            self.fatality_bonus = FATALITY_BONUS
+            self.fatality_gems = FATALITY_GEMS
+            self.reward += FATALITY_BONUS
+            self.fat_style = self.p.h["style"]
+            self.fat_anim_t = 0.0
+            self.phase = "fatality_anim"
+            self.phase_t = FATALITY_ANIM_T
+            self.shake = 10
+        else:
+            self.phase = "end"
+            self.phase_t = 1e9
+
+    def fatality_anim_step(self, dt, t):
+        foe = self.b
+        fx, fy = foe.x, foe.y - 80 * foe.scale
+        style = self.fat_style
+        if t >= 0.9:
+            foe.fatality_hide = True
+        if style == "flame":
+            if random.random() < dt * 70:
+                self.parts.rise(fx + random.uniform(-34, 34), foe.y - random.uniform(0, 150) * foe.scale,
+                                random.choice(("#ff5a1a", "#ff8c1a", "#ffd23f")))
+            if random.random() < dt * 20:
+                self.parts.spark(fx, fy)
+        elif style == "hood":
+            if random.random() < dt * 40:
+                self.parts.rise(fx + random.uniform(-26, 26), foe.y - random.uniform(0, 120) * foe.scale,
+                                random.choice(("#3fd97a", "#8aff8a", "#bfffd8")))
+        elif style == "glow":
+            if random.random() < dt * 30:
+                self.parts.spark(fx + random.uniform(-40, 40), fy + random.uniform(-60, 60))
+            if random.random() < dt * 8:
+                self.parts.ring(fx, fy, "#fff2b0", 8, 90, 0.4)
+        else:
+            if t < 0.4 and random.random() < dt * 40:
+                self.parts.gibs(fx, foe.y - 70 * foe.scale, 3)
+            if random.random() < dt * 25:
+                self.parts.blood(fx + random.uniform(-20, 20), foe.y - 60 * foe.scale, 2,
+                                 random.choice((-1, 1)), big=True)
+        self.shake = max(self.shake, 3)
+
+    def apply_input(self, f, inp, foe):
+        if f.dead or f.stun_t > 0:
+            f.vx_target = 0.0
+            f.crouch = False
+            return
+        f.crouch = inp["crouch"] and f.on_ground
+        f.vx_target = inp["move"] * 330 * f.eff_speed() * (0.45 if f.crouch else 1.0)
+        if inp["jump"] and f.on_ground and not f.crouch and f.can_jump():
+            f.vy = -960.0
+            f.on_ground = False
+        if inp["attack"]:
+            if f.crouch:
+                f.try_strike("sweep", self)
+            elif not f.on_ground:
+                f.try_strike("air", self)
+            else:
+                f.start_attack(self)
+        if inp.get("strike"):
+            f.try_strike(inp["strike"], self)
+        if inp.get("parry"):
+            f.try_parry()
+        if inp["cast"] is not None:
+            self.cast_ability(f, inp["cast"], foe)
+        if inp.get("special"):
+            self.cast_special(f, inp["special"], foe)
+        if inp.get("myth"):
+            self.try_myth_ult(f, foe)
 
     def update(self, dt, inp):
         self.time += dt
@@ -155,6 +279,9 @@ class Arena:
             self.parts.update(dt * 0.15)
             return
         self.parts.update(dt)
+        if self.mirror:
+            self.mirror_tick(dt)
+            return
         if self.phase == "intro":
             if self.phase_t <= 0:
                 self.phase = "fight"
@@ -165,35 +292,43 @@ class Arena:
             if self.phase_t <= 0:
                 self.after_ko()
             return
+        if self.phase == "fatality":
+            fat = self.fatality
+            fat["t"] -= dt
+            queue, self.pending_fat = self.pending_fat, []
+            seq, idx = fat["seq"], fat["idx"]
+            for tok in queue:
+                if idx < len(seq) and tok == seq[idx]:
+                    idx += 1
+                    fat["idx"] = idx
+                    self.parts.ring(self.p.x, self.p.y - 120 * self.p.scale, COL_GOLD, 10, 60, 0.3)
+                    if idx >= len(seq):
+                        self.finish_fatality(True)
+                        break
+                else:
+                    fat["idx"] = 0
+                    idx = 0
+            if self.phase == "fatality" and fat["t"] <= 0:
+                self.finish_fatality(False)
+            self.p.anim_t += dt
+            self.b.anim_t += dt
+            return
+        if self.phase == "fatality_anim":
+            self.fatality_anim_step(dt, FATALITY_ANIM_T - self.phase_t)
+            if self.phase_t <= 0:
+                self.phase = "end"
+                self.phase_t = 1e9
+            return
 
         p, b = self.p, self.b
-        if p.dead or p.stun_t > 0:
-            p.vx_target = 0.0
-            p.crouch = False
+        if self.net:
+            r = self.remote_inp
+            self.remote_inp = None
+            if r is not None:
+                self.apply_input(b, r, p)
         else:
-            p.crouch = inp["crouch"] and p.on_ground
-            p.vx_target = inp["move"] * 330 * p.eff_speed() * (0.45 if p.crouch else 1.0)
-            if inp["jump"] and p.on_ground and not p.crouch and p.can_jump():
-                p.vy = -960.0
-                p.on_ground = False
-            if inp["attack"]:
-                if p.crouch:
-                    p.try_strike("sweep", self)
-                elif not p.on_ground:
-                    p.try_strike("air", self)
-                else:
-                    p.start_attack(self)
-            if inp.get("strike"):
-                p.try_strike(inp["strike"], self)
-            if inp.get("parry"):
-                p.try_parry()
-            if inp["cast"] is not None:
-                self.cast_ability(p, inp["cast"], b)
-            if inp.get("special"):
-                self.cast_special(p, inp["special"], b)
-            if inp.get("myth"):
-                self.try_myth_ult(p, b)
-        self.ai.update(dt, p, self)
+            self.ai.update(dt, p, self)
+        self.apply_input(p, inp, b)
         p.update(dt, b, self)
         b.update(dt, p, self)
 
@@ -235,6 +370,109 @@ class Arena:
             self.phase = "ko"
             self.phase_t = 1.8
 
+    def netfx(self, x, y, color):
+        if self.net:
+            self.net_events.append(("f", round(x, 1), round(y, 1), color))
+
+    def snapshot(self):
+        ev, self.net_events = self.net_events, []
+        return {"t": "snap", "ph": self.phase,
+                "pt": round(self.phase_t, 3) if self.phase_t < 1e8 else 1e9,
+                "wp": self.wins_p, "wb": self.wins_b, "rnd": self.round,
+                "shk": round(self.shake, 1), "cmb": self.combo_count,
+                "win": self.win, "fd": self.fatality_done, "fb": self.fatality_bonus,
+                "fst": self.fat_style, "p": _snap_fighter(self.p), "b": _snap_fighter(self.b),
+                "ev": ev, "fat": dict(self.fatality) if self.fatality else None}
+
+    def apply_snap(self, snap):
+        prev = self.phase
+        self.phase = snap.get("ph", prev)
+        self.phase_t = snap.get("pt", 0.0)
+        self.wins_p = snap.get("wp", 0)
+        self.wins_b = snap.get("wb", 0)
+        self.round = snap.get("rnd", 1)
+        self.shake = max(self.shake, snap.get("shk", 0.0))
+        self.combo_count = snap.get("cmb", 0)
+        if self.combo_count >= 2:
+            self.combo_show = 1.2
+        self.win = not snap.get("win", False)
+        self.fatality_done = snap.get("fd", False)
+        self.fat_style = snap.get("fst", "plain")
+        if self.fatality_done and not self.win:
+            self.fatality_bonus = snap.get("fb", 0)
+            self.fatality_gems = FATALITY_GEMS
+            self.reward = self.fatality_bonus
+        else:
+            self.fatality_bonus = 0
+            self.fatality_gems = 0
+            self.reward = 0
+        self.fatality = snap.get("fat")
+        if self.phase == "fatality_anim" and prev != "fatality_anim":
+            self.fat_anim_t = 0.0
+            self.b.fatality_hide = False
+        for key, f in (("p", self.p), ("b", self.b)):
+            d = snap.get(key)
+            if not d:
+                continue
+            if not f.synced:
+                f.x = f.tx = d["x"]
+                f.y = f.ty = d["y"]
+                f.synced = True
+            else:
+                f.tx, f.ty = d["x"], d["y"]
+            f.facing = d["fc"]
+            f.crouch = d["cr"]
+            f.on_ground = d["gr"]
+            f.hp = d["hp"]
+            f.max_hp = d["mhp"]
+            f.disp_hp = d["dh"]
+            f.dead = d["dd"]
+            f.dead_t = d["dt"]
+            f.attack_t = d["at"]
+            f.attack_kind = d["ak"]
+            f.stun_t = d["st"]
+            f.hurt_t = d["ht"]
+            f.hit_flash = d["hf"]
+            f.energy = d["en"]
+            f.buffs.update(d["bf"])
+            f.combo = d["cb"]
+            f.root_t = d["rt"]
+            f.scythe_out = d["sc"]
+            f.cds = list(d["cds"])
+            f.sp_cds = dict(d["spcd"])
+            f.strike_cds = dict(d["stcd"])
+            f.parry_cd = d["pcd"]
+            f.parry_t = d["pt"]
+            f.injury = {"kind": d["inj"], "ability": d.get("inja", 0)} if d["inj"] else None
+        for ev in snap.get("ev", ()):
+            if ev[0] == "h":
+                _, x, y, dmg, crit = ev
+                self.parts.blood(x, y, 6 if crit else 4, self.p.facing, big=crit)
+                self.parts.burst(x, y, "#ffd23f" if not crit else "#ff5a1a", 8, 220)
+                self.parts.dmg_text(x, y - 60, dmg, big=crit)
+            elif ev[0] == "f":
+                _, x, y, color = ev
+                self.parts.burst(x, y, color, 10, 240)
+                self.parts.ring(x, y, color, 8, 54, 0.3)
+
+    def mirror_tick(self, dt):
+        snap = self.pending_snap
+        if snap is not None:
+            self.pending_snap = None
+            self.apply_snap(snap)
+        for f in (self.p, self.b):
+            if f.synced:
+                k = min(1.0, dt * 14)
+                f.x += (f.tx - f.x) * k
+                f.y += (f.ty - f.y) * k
+                f.anim_t += dt
+                if f.dead:
+                    f.dead_t += dt
+                f.disp_hp += (f.hp - f.disp_hp) * min(1.0, dt * 8)
+        if self.phase == "fatality_anim":
+            self.fatality_anim_step(dt, self.fat_anim_t)
+            self.fat_anim_t += dt
+
     def register_hit(self, att, foe, base, heavy=False, kb_force=None, stun=0.0, force_crit=False,
                      pierce_guard=False):
         if foe.dead:
@@ -262,6 +500,9 @@ class Arena:
             return res, 0.0
         if res != "hit":
             return res, 0.0
+        if self.net:
+            self.net_events.append(("h", round(foe.x, 1), round(foe.y - 100 * foe.scale, 1),
+                                    round(dmg, 1), crit))
         self.parts.blood(foe.x, foe.y - 100 * foe.scale, 5 if crit else 3, att.facing, big=crit)
         self.roll_injury(att, foe, heavy or crit)
         if crit:
@@ -390,6 +631,7 @@ class Arena:
                         "x": foe.x, "y": foe.y - 90 * foe.scale})
         if f is self.p:
             self.stats["myth_ults"] += 1
+        self.netfx(f.x, f.y - 90 * f.scale, "#ff2a8a")
         self.shake = max(self.shake, 10)
         self.parts.ring(f.x, f.y - 90 * f.scale, "#ff2a8a", 16, 130, 0.5)
         self.parts.burst(f.x, f.y - 90 * f.scale, "#ff2a8a", 20, 300)
@@ -412,6 +654,7 @@ class Arena:
         if not self.exec_kind(f, ab, foe):
             return False
         f.cds[idx] = ab["cd"]
+        self.netfx(f.x, f.y - 90 * f.scale, f.h["glow"])
         return True
 
     def cast_special(self, f, combo, foe):
@@ -431,6 +674,7 @@ class Arena:
         f.sp_cds[combo] = sp.get("cd", 8.0)
         if f is self.p:
             self.stats["specials"] += 1
+        self.netfx(f.x, f.y - 90 * f.scale, f.h["accent"])
         self.parts.ring(f.x, f.y - 90 * f.scale, "#ffd23f", 14, 92, 0.35)
         self.parts.burst(f.x, f.y - 90 * f.scale, f.h["accent"], 12, 220)
         return True
@@ -1244,6 +1488,30 @@ class Arena:
         cv.create_text(W / 2 + off + 4, y + 4, text=txt, font=F_HUGE, fill="#2a0503", tags=("dyn",))
         cv.create_text(W / 2 + off, y, text=txt, font=F_HUGE, fill=col, tags=("dyn",))
 
+    def draw_fatality_prompt(self, cv):
+        fat = self.fatality
+        if not fat:
+            return
+        seq, idx, t = fat["seq"], fat["idx"], max(0.0, fat["t"])
+        n = len(seq)
+        bw, gap = 74, 14
+        x0 = W / 2 - (n * bw + (n - 1) * gap) / 2
+        cv.create_text(W / 2, 535, text="УСПЕЙ НАБРАТЬ КОМБО:", fill="#e8c9a0", font=F_SMALL, tags=("dyn",))
+        for i, tok in enumerate(seq):
+            x = x0 + i * (bw + gap)
+            done = i < idx
+            cur = i == idx
+            col = COL_GOLD if done else ("#ff5a1a" if (cur and int(t * 6) % 2) else "#ff8c1a" if cur else "#5a1c10")
+            cv.create_rectangle(x, 560, x + bw, 620, fill="#1c0a08", outline=col, width=3, tags=("dyn",))
+            cv.create_text(x + bw / 2, 590, text=FATALITY_TXT.get(tok, tok.upper()),
+                           fill=COL_GOLD if done else ("#ffd23f" if cur else "#8a4a20"), font=F_MID, tags=("dyn",))
+        frac = t / FATALITY_WINDOW
+        cv.create_rectangle(W / 2 - 220, 640, W / 2 + 220, 654, fill="#160404", outline="#5a1c10",
+                            width=1, tags=("dyn",))
+        if frac > 0:
+            cv.create_rectangle(W / 2 - 218, 642, W / 2 - 218 + int(436 * frac), 652,
+                                fill=COL_RED if frac < 0.35 else COL_GOLD, outline="", tags=("dyn",))
+
     def draw(self, cv, coins):
         sh = self.shake
         ox = random.uniform(-sh, sh) if sh > 0.5 else 0.0
@@ -1251,7 +1519,8 @@ class Arena:
         cv.delete("dyn")
         self.draw_fx(cv, ox, oy, True)
         self.p.render(cv, ox, oy)
-        self.b.render(cv, ox, oy)
+        if not getattr(self.b, "fatality_hide", False):
+            self.b.render(cv, ox, oy)
         self.draw_fx(cv, ox, oy, False)
         self.draw_proj(cv, ox, oy)
         for m in self.melee:
@@ -1281,6 +1550,13 @@ class Arena:
             self.banner(cv, txt, col)
         elif self.phase == "ko":
             self.banner(cv, "НОКАУТ!", COL_RED)
+        elif self.phase == "fatality":
+            cv.create_rectangle(0, 0, W, H, fill="#050101", stipple="gray50", outline="", tags=("dyn",))
+            self.banner(cv, "ФАТАЛИТИ", COL_RED)
+            self.draw_fatality_prompt(cv)
+        elif self.phase == "fatality_anim":
+            cv.create_rectangle(0, 0, W, H, fill="#050101", stipple="gray50", outline="", tags=("dyn",))
+            self.banner(cv, "ФАТАЛИТИ!", COL_RED)
         elif self.phase == "end":
             cv.create_rectangle(0, 0, W, H, fill="#0a0202", stipple="gray50", outline="", tags=("dyn",))
             cv.create_rectangle(W / 2 - 400, 220, W / 2 + 400, 660, fill=COL_DARK, outline=COL_GOLD,
@@ -1301,9 +1577,13 @@ class Arena:
                 t1 = "ПОБЕДА!" if self.win else "ПОРАЖЕНИЕ"
                 cv.create_text(W / 2, 295, text=t1, font=F_HUGE,
                                fill=COL_GOLD if self.win else "#8a4a20", tags=("dyn",))
-                if self.win:
+                if self.win and self.reward > 0:
                     cv.create_text(W / 2, 365, text="+%d МОНЕТ" % self.reward, font=F_BIG, fill=COL_ORANGE, tags=("dyn",))
+                if self.net:
+                    sub = "ДРУЖЕСКИЙ БОЙ · ПОЛНЫЙ БАЛАНС"
+                else:
                     sub = "Уровень %d%s пройден!" % (self.level, " (БОСС ×2)" if self.boss else "")
+                if self.win:
                     cv.create_text(W / 2, 410, text=sub, font=F_SMALL, fill="#e8c9a0", tags=("dyn",))
                 if getattr(self, "exp_gain", 0):
                     cv.create_text(W / 2, 440, text="+%d EXP" % self.exp_gain,
@@ -1311,9 +1591,12 @@ class Arena:
                 if getattr(self, "finish_bonus", 0):
                     cv.create_text(W / 2, 462, text="БОНУС ЗА ДОБИВАНИЕ +%d" % self.finish_bonus,
                                    font=F_SMALL, fill=COL_GOLD, tags=("dyn",))
-                else:
+                elif not self.win:
                     cv.create_text(W / 2, 375, text="Бот уровня %d оказался сильнее." % self.level,
                                    font=F_SMALL, fill="#e8c9a0", tags=("dyn",))
-                cv.create_text(W / 2, 470, text="Счёт раундов  %d : %d   ·   Макс. комбо: %d" % (
+                if self.fatality_bonus:
+                    cv.create_text(W / 2, 488, text="ФАТАЛИТИ: +%d МОНЕТ +%d САМ." % (self.fatality_bonus, FATALITY_GEMS),
+                                   font=F_SMALL, fill=COL_GEM, tags=("dyn",))
+                cv.create_text(W / 2, 512, text="Счёт раундов  %d : %d   ·   Макс. комбо: %d" % (
                     self.wins_p, self.wins_b, self.max_combo),
                     font=F_SMALL, fill=COL_SAND, tags=("dyn",))

@@ -75,6 +75,15 @@ class Particles:
                                "color": COL_BLOOD if random.random() < 0.7 else "#8a0e08",
                                "r": random.uniform(2, 4.5) * (1.3 if big else 1.0), "g": 900})
 
+    def gibs(self, x, y, n=10):
+        n = self._room(n)
+        for _ in range(n):
+            self.items.append({"kind": "gib", "x": x, "y": y,
+                               "vx": random.uniform(-280, 280), "vy": random.uniform(-460, -140),
+                               "t": random.uniform(0.8, 1.4), "life": 1.4,
+                               "color": random.choice((COL_BLOOD, "#8a0e08", "#5a1c10")),
+                               "r": random.uniform(3, 7), "g": 1100})
+
     def dmg_text(self, x, y, n, color=COL_GOLD, big=False, txt=None):
         if not self._room(1):
             return
@@ -107,6 +116,10 @@ class Particles:
                 w = max(1, int(4 * (1.0 - k)))
                 cv.create_oval(q["x"] - r + ox, q["y"] - r + oy, q["x"] + r + ox, q["y"] + r + oy,
                                outline=q["color"], width=w, tags=("dyn",))
+            elif q.get("kind") == "gib":
+                r = q["r"] * max(0.4, q["t"] / q["life"])
+                cv.create_rectangle(q["x"] - r + ox, q["y"] - r + oy, q["x"] + r + ox, q["y"] + r * 0.7 + oy,
+                                    fill=q["color"], outline="", tags=("dyn",))
             else:
                 r = q["r"] * max(0.35, q["t"] / q["life"])
                 cv.create_oval(q["x"] - r + ox, q["y"] - r + oy, q["x"] + r + ox, q["y"] + r + oy,
