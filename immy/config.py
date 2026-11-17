@@ -1,6 +1,7 @@
 """IMMY — глобальные константы: размеры, физика, шрифты, палитра, бой."""
 
 import os
+import sys
 
 TITLE = "IMMY"
 
@@ -11,7 +12,12 @@ GROUND_Y = 770
 WALL = 80
 GRAVITY = 2400.0
 
-SAVE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "immy_save.json")
+if getattr(sys, "frozen", False):
+    _BASE_DIR = os.path.dirname(sys.executable)
+else:
+    _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+SAVE_FILE = os.path.join(_BASE_DIR, "immy_save.json")
 
 F_TITLE = ("Courier", 64, "bold")
 F_HUGE = ("Courier", 48, "bold")
@@ -95,3 +101,26 @@ NET_DISCOVER_PORT = 55555
 NET_FIGHT_PORT = 55556
 NET_SCAN_TIMEOUT = 0.8
 NET_SNAP_HZ = 30
+
+ZONE_HEAD = 1.30
+ZONE_BODY = 1.00
+ZONE_LEGS = 0.80
+ZONE_HEAD_STUN = 0.12
+ZONE_LEGS_SLOW = 0.9
+
+TRAP_CYCLE = 6.0
+TRAP_ACTIVE = 1.6
+TRAP_DMG = (8, 15)
+TRAP_BLEED = 2.0
+TRAP_ZONE = 120
+
+ART_SLOTS = 3
+NATURE_MATCH_BONUS = 0.07
+
+MUSIC_VOL = 0.7
+SFX_VOL = 0.8
+
+SURV_FRAG_CHANCE = 0.55
+SURV_FRAG_BOSS_CHANCE = 1.0
+
+DIALOG_INTRO_T = 1.6

@@ -831,6 +831,114 @@ def main():
     assert len(set(ids)) == 191
     print("achievements 191 ok")
 
+    from immy import artifacts as art_mod
+    from immy.artifacts import (ARTIFACTS, ART_BY_ID, NATURES, artifact_buffs,
+                                can_craft, hero_nature)
+    assert len(ARTIFACTS) == 30 and len(ART_BY_ID) == 30
+    for art in ARTIFACTS:
+        assert art["nature"] in NATURES and art["tier"] in (1, 2, 3)
+        assert art["buff"] and sum(art["cost"].values()) >= 2
+    assert hero_nature("DEADY") == "dark"
+    buffs = artifact_buffs("DEADY", ["dusk_veil", "night_fang"])
+    assert buffs["crit"] > 0.07, buffs
+    plain = artifact_buffs("DEADY", ["stone_palm"])
+    boost = artifact_buffs("DEADY", [])
+    assert boost == {}
+    assert can_craft(ART_BY_ID["ember_charm"], {"fire": 2}, 0)
+    assert not can_craft(ART_BY_ID["ember_charm"], {"fire": 1}, 0)
+    assert not can_craft(ART_BY_ID["molten_plate"], {"fire": 9}, 2)
+    print("artifacts 30 ok")
+
+    from immy.config import ZONE_HEAD, ZONE_LEGS
+    a = Arena("DEADY", "LIGHTY", 1, False, map=MAPS[0], sfx=None)
+    a.phase = "fight"
+    a.p.crit_chance = 0.0
+    a.b.hp = a.b.max_hp = 1000.0
+    base = 100.0
+    _, d_body = a.register_hit(a.p, a.b, base, zone="body")
+    a.b.hp = a.b.max_hp = 1000.0
+    _, d_head = a.register_hit(a.p, a.b, base, zone="head")
+    a.b.hp = a.b.max_hp = 1000.0
+    _, d_legs = a.register_hit(a.p, a.b, base, zone="legs")
+    assert d_head > d_body and d_legs < d_body, (d_head, d_body, d_legs)
+    ratio = d_head / d_body
+    assert abs(ratio - ZONE_HEAD) < 0.05, ratio
+    assert abs(d_legs / d_body - ZONE_LEGS) < 0.05
+    a2 = Arena("DEADY", "LIGHTY", 1, False, map=MAPS[0], sfx=None)
+    a2.phase = "fight"
+    a2.b.hp = a2.b.max_hp = 1000.0
+    a2.register_hit(a2.p, a2.b, base, hit_y=a2.b.y - a2.b.bbox()[3] + a2.b.bbox()[1])
+    assert a2.stats["headshots"] >= 0
+    print("zones ok")
+
+    trap_maps = [m for m in MAPS if m.get("trap")]
+    assert len(MAPS) == 30 and len(trap_maps) >= 10
+    from immy.background import trap_phase
+    act1, _ = trap_phase(0.5)
+    act2, _ = trap_phase(4.0)
+    assert act1 and not act2
+    at = Arena("DEADY", "LIGHTY", 1, False, map=trap_maps[0], sfx=None)
+    at.phase = "fight"
+    at.time = 0.5
+    hp0 = at.p.hp
+    at.p.x = 90.0
+    at.update_traps(1 / 60)
+    if trap_maps[0]["trap"] == "spikes":
+        assert at.p.hp < hp0, (at.p.hp, hp0)
+    print("arenas 30 + traps ok")
+
+    from immy import dialogue as dlg_mod
+    for pool in (dlg_mod.INTRO, dlg_mod.BOSS_INTRO, dlg_mod.ROUND2, dlg_mod.BOT_WIN,
+                 dlg_mod.PLAYER_WIN, dlg_mod.TAUNT_ON_COMBO, dlg_mod.TAUNT_ON_CAST,
+                 dlg_mod.BOSS_CAST, dlg_mod.TAUNT_ON_PARRY):
+        assert pool and all(isinstance(x, str) and x for x in pool)
+    a3 = Arena("DEADY", "LIGHTY", 1, False, map=MAPS[0], sfx=None)
+    assert a3.say is not None and a3.say_t > 0
+    print("dialogues ok")
+
+    from immy.config import FATALITY_ANIM_T
+    from immy.arena import FATALITY_VARIANTS
+    assert set(FATALITY_VARIANTS) >= {"flame", "hood", "glow", "plain", "spike", "spider"}
+    assert all(len(v) >= 2 for v in FATALITY_VARIANTS.values())
+    a4 = Arena("DEADY", "LIGHTY", 1, True, map=MAPS[0], sfx=None)
+    a4.phase = "fatality"
+    a4.fatality = {"seq": ["w", "a", "s", "d"], "idx": 0, "t": 4.0}
+    a4.pending_fat = ["w", "a", "s", "d"]
+    a4.finish_fatality(True)
+    assert a4.phase == "fatality_anim" and a4.fatality_done
+    assert getattr(a4, "fat_variant", "")
+    for _ in range(200):
+        a4.fatality_anim_step(1 / 60, FATALITY_ANIM_T - a4.phase_t)
+        a4.phase_t -= 1 / 60
+    assert a4.b.fatality_hide
+    print("fatality variants ok")
+
+    from immy.fighter import Fighter
+    f = Fighter("DEADY", 400, 1, buffs={"armor": 0.2, "dmg": 0.1, "hp": 0.5, "crit": 0.1})
+    assert f.armor == 0.2 and f.max_hp == 150.0 and f.crit_chance > 0.1
+    dmg_before = 50.0
+    f2 = Fighter("DEADY", 400, 1)
+    f2.take_damage(50.0)
+    assert f2.hp == f2.max_hp - 50.0
+    f.take_damage(50.0)
+    assert abs(f.hp - (f.max_hp - 40.0)) < 0.01, f.hp
+    print("artifact buffs on fighter ok")
+
+    d = save_mod.default_save()
+    assert "settings" in d and "frags" in d and "arts" in d and "equip" in d
+    assert d["settings"]["mute"] is False and 0.0 <= d["settings"]["music"] <= 1.0
+    print("save schema ok")
+
+    from immy.sound import Sfx, Audio
+    sx = Sfx()
+    sx.set_volume(0.5)
+    assert sx.volume == 0.5
+    au = Audio({"music": 0.3, "sfx": 0.4, "mute": True})
+    assert au.music.enabled is False and au.sfx.enabled is False
+    au.apply({"music": 0.3, "sfx": 0.4, "mute": False})
+    assert au.music.enabled and au.music.volume == 0.3
+    print("audio settings ok")
+
     print("SELFTEST OK")
 
 

@@ -4,21 +4,33 @@ import math
 import random
 
 from .ai import BotAI
-from .background import MAPS, draw_hero_icon
+from .artifacts import NATURE_LABEL, artifact_buffs
+from .background import MAPS, draw_hero_icon, trap_phase
 from .config import (COMBO_KB, COMBO_MULT, COL_BLOOD, COL_DEEPRED, COL_DARK, COL_FRAME, COL_GEM, COL_GOLD,
-                     COL_ORANGE, COL_RED, COL_SAND, CRIT_MULT, FATALITY_ANIM_T, FATALITY_BONUS,
+                     COL_ORANGE, COL_RED, COL_SAND, CRIT_MULT, DIALOG_INTRO_T, FATALITY_ANIM_T, FATALITY_BONUS,
                      FATALITY_GEMS, FATALITY_KEYS, FATALITY_TXT, FATALITY_WINDOW, F_BIG, F_HUGE, F_MID,
                      F_SMALL, F_TINY, GROUND_Y, H, INJURY_CHANCE, LEGEND_FOE_HP, MARTYR_COIN_PER_DMG,
                      MARTYR_DMG_MULT, MARTYR_GEMS, MARTYR_HP_MULT, MARTYR_ROUNDS, MELEE_RANGE,
                      MYTH_ENERGY, MYTH_FOE_HP, PARRY_CD, PARRY_STUN, RIPOSTE_DUR, RIPOSTE_MULT,
-                     RARITY_POWER, THORNS_PCT, ULT_CHARGE_MAX, ULT_HP, ULT_LEFT, ULT_QUALITY,
-                     ULT_RANGE_Y, W, WALL)
+                     RARITY_POWER, THORNS_PCT, TRAP_BLEED, TRAP_CYCLE, TRAP_DMG, TRAP_ZONE, ULT_CHARGE_MAX,
+                     ULT_HP, ULT_LEFT, ULT_QUALITY, ULT_RANGE_Y, W, WALL, ZONE_BODY, ZONE_HEAD,
+                     ZONE_HEAD_STUN, ZONE_LEGS)
+from . import dialogue
 from .fighter import Fighter
 from .heroes import HEROES
 from .particles import Particles
 from .util import clamp
 
 HAZE_SELF_KINDS = {"ground", "hand", "orb", "strike", "shock", "barrage", "roar", "aoe", "meteor", "rain", "wave"}
+
+FATALITY_VARIANTS = {
+    "flame": ("ИНФЕРНО", "КРОВАВАЯ ВОЛНА", "ИСПЕПЕЛЕНИЕ"),
+    "hood": ("ЖАТВА ДУШ", "ПОГРЕБЕНИЕ", "ПОЦЕЛУЙ СМЕРТИ"),
+    "glow": ("ПЕРЕГРУЗКА", "ГНЕВ НЕБЕС", "РАЗРЯД ТЫСЯЧИ ВОЛЬТ"),
+    "spike": ("КОЛОДКА", "ДРОБИЛКА", "БУРИ ШИПОВ"),
+    "spider": ("КОКОН", "ЯДОВИТОЕ ГНЕЗДО", "ПОЕДАНИЕ"),
+    "plain": ("РАЗРЫВ", "ДРОБИЛКА", "ПОСЛЕДНИЙ УДАР"),
+}
 
 
 def _snap_fighter(f):
@@ -38,7 +50,9 @@ def _snap_fighter(f):
 
 class Arena:
     def __init__(self, player_key, bot_key, level, boss, map=None, survival=False, net=False, mirror=False,
-                 martyr=False):
+                 martyr=False, sfx=None, equip=None):
+        self.sfx = sfx
+        self.equip = list(equip or [])
         self.level = level
         self.boss = boss
         self.survival = survival
@@ -66,7 +80,8 @@ class Arena:
         self.wins_b = 0
         self.phase = "intro"
         self.phase_t = 1.6
-        self.p = Fighter(player_key, W * 0.32, 1)
+        self.p = Fighter(player_key, W * 0.32, 1,
+                         buffs=None if self.net else artifact_buffs(player_key, self.equip))
         pw = 1.0 if self.net else RARITY_POWER.get(HEROES[player_key]["rarity"], 1.0)
         self.p.power = pw
         self.p.max_hp = 100.0 * pw
@@ -104,13 +119,27 @@ class Arena:
         self.quality_finish = 0
         self.stats = {"specials": 0, "ults": 0, "parries": 0, "strikes": 0, "injuries": 0, "myth_ults": 0,
                       "casts": 0, "bleeds": 0, "chains": 0, "saws": 0, "roars": 0, "aoes": 0,
-                      "haze": 0, "legend_ults": 0}
+                      "haze": 0, "legend_ults": 0, "headshots": 0, "traps": 0}
         self.win = False
         self.reward = 0
         self.rewarded = False
         self.time = 0.0
+        self.trap_cd = {"p": 0.0, "b": 0.0}
+        self.say = None
+        self.say_t = 0.0
+        self.set_say(dialogue.intro_line(boss), self.b)
         if self.mirror:
             self.ai = None
+
+    def snd(self, name):
+        if self.sfx is not None:
+            self.sfx.play(name)
+
+    def set_say(self, text, who=None):
+        if not text:
+            return
+        self.say = (who, text)
+        self.say_t = DIALOG_INTRO_T + 1.2
 
     def foe_of(self, f):
         return self.b if f is self.p else self.p
@@ -186,6 +215,7 @@ class Arena:
                 self.reset_round()
                 self.phase = "intro"
                 self.phase_t = 1.6
+                self.set_say(dialogue.pick(dialogue.ROUND2), self.b)
             return
         if self.survival:
             if self.p.dead:
@@ -240,42 +270,72 @@ class Arena:
             self.fatality_gems = FATALITY_GEMS
             self.reward += FATALITY_BONUS
             self.fat_style = self.p.h["style"]
+            self.fat_variant = random.choice(FATALITY_VARIANTS.get(self.fat_style,
+                                                                   FATALITY_VARIANTS["plain"]))
             self.fat_anim_t = 0.0
             self.phase = "fatality_anim"
             self.phase_t = FATALITY_ANIM_T
             self.shake = 10
+            self.snd("fatal")
         else:
             self.phase = "end"
             self.phase_t = 1e9
 
     def fatality_anim_step(self, dt, t):
+        """Поэтапное фаталити: серия ударов → магия → добивание (вариант по стилю)."""
         foe = self.b
         fx, fy = foe.x, foe.y - 80 * foe.scale
-        style = self.fat_style
-        if t >= 0.9:
-            foe.fatality_hide = True
-        if style == "flame":
-            if random.random() < dt * 70:
-                self.parts.rise(fx + random.uniform(-34, 34), foe.y - random.uniform(0, 150) * foe.scale,
-                                random.choice(("#ff5a1a", "#ff8c1a", "#ffd23f")))
-            if random.random() < dt * 20:
-                self.parts.spark(fx, fy)
-        elif style == "hood":
-            if random.random() < dt * 40:
-                self.parts.rise(fx + random.uniform(-26, 26), foe.y - random.uniform(0, 120) * foe.scale,
-                                random.choice(("#3fd97a", "#8aff8a", "#bfffd8")))
-        elif style == "glow":
-            if random.random() < dt * 30:
-                self.parts.spark(fx + random.uniform(-40, 40), fy + random.uniform(-60, 60))
-            if random.random() < dt * 8:
-                self.parts.ring(fx, fy, "#fff2b0", 8, 90, 0.4)
+        variant = getattr(self, "fat_variant", "")
+        if t < 0.8:
+            step = int(t / 0.26)
+            if getattr(self, "fat_hit_n", -1) != step:
+                self.fat_hit_n = step
+                self.parts.burst(fx + random.uniform(-14, 14), fy + random.uniform(-40, 40),
+                                 "#fff2b0", 16, 300)
+                self.parts.blood(fx, foe.y - 90 * foe.scale, 6, self.p.facing, big=True)
+                self.parts.ring(fx, fy, COL_GOLD, 10, 70, 0.3)
+                foe.kvx += self.p.facing * 120
+                self.shake = max(self.shake, 12)
+                self.hitstop = max(self.hitstop, 0.08)
+                self.snd("crit")
+        elif t < 1.6:
+            if random.random() < dt * 60:
+                self.parts.rise(fx + random.uniform(-36, 36), foe.y - random.uniform(0, 160) * foe.scale,
+                                random.choice(self.fat_colors()))
+            if random.random() < dt * 6:
+                self.parts.ring(fx, fy, self.p.h["glow"], 12, 110, 0.5)
+            self.shake = max(self.shake, 6)
         else:
-            if t < 0.4 and random.random() < dt * 40:
-                self.parts.gibs(fx, foe.y - 70 * foe.scale, 3)
-            if random.random() < dt * 25:
-                self.parts.blood(fx + random.uniform(-20, 20), foe.y - 60 * foe.scale, 2,
+            if random.random() < dt * 50:
+                self.parts.gibs(fx, foe.y - 60 * foe.scale, 2)
+            if random.random() < dt * 30:
+                self.parts.blood(fx + random.uniform(-24, 24), foe.y - 50 * foe.scale, 3,
                                  random.choice((-1, 1)), big=True)
-        self.shake = max(self.shake, 3)
+            if random.random() < dt * 26:
+                self.parts.rise(fx + random.uniform(-30, 30), foe.y - random.uniform(0, 120) * foe.scale,
+                                random.choice(self.fat_colors()))
+            self.shake = max(self.shake, 4)
+        if t >= 1.9:
+            foe.fatality_hide = True
+            if random.random() < dt * 20:
+                self.parts.splat(fx + random.uniform(-60, 60), GROUND_Y, 4)
+        if 1.55 <= t < 1.65:
+            self.parts.dmg_text(fx, foe.y - 250 * foe.scale, 0, txt=variant,
+                                color=COL_RED, big=True)
+
+    def fat_colors(self):
+        style = self.fat_style
+        if style == "flame":
+            return ("#ff5a1a", "#ff8c1a", "#ffd23f")
+        if style == "hood":
+            return ("#3fd97a", "#8aff8a", "#bfffd8")
+        if style == "glow":
+            return ("#fff2b0", "#dfe6ff", "#ffd23f")
+        if style == "spike":
+            return ("#c9a15a", "#e8d8c8", "#ff5a1a")
+        if style == "spider":
+            return ("#7ad12a", "#c41414", "#2a2a2a")
+        return ("#c41414", "#ff5a1a", "#e8c9a0")
 
     def apply_input(self, f, inp, foe):
         if f.dead or f.stun_t > 0:
@@ -287,6 +347,8 @@ class Arena:
         if inp["jump"] and f.on_ground and not f.crouch and f.can_jump():
             f.vy = -960.0
             f.on_ground = False
+            if f is self.p:
+                self.snd("jump")
         if inp["attack"]:
             if f.crouch:
                 f.try_strike("sweep", self)
@@ -391,6 +453,9 @@ class Arena:
 
         self.update_proj(dt)
         self.update_fx(dt)
+        self.update_traps(dt)
+        if self.say_t > 0:
+            self.say_t -= dt
 
         if p.hp <= 0 and not p.dead:
             p.dead = True
@@ -400,6 +465,8 @@ class Arena:
             self.hitstop = 0.12
             self.phase = "ko"
             self.phase_t = 1.8
+            self.snd("ko")
+            self.set_say(dialogue.pick(dialogue.BOT_WIN), self.b)
         elif b.hp <= 0 and not b.dead:
             b.dead = True
             self.wins_p += 1
@@ -408,6 +475,48 @@ class Arena:
             self.hitstop = 0.12
             self.phase = "ko"
             self.phase_t = 1.8
+            self.snd("ko")
+            self.set_say(dialogue.pick(dialogue.PLAYER_WIN), self.b)
+
+    def update_traps(self, dt):
+        trap = self.map.get("trap")
+        if not trap:
+            return
+        for key in ("p", "b"):
+            if self.trap_cd[key] > 0:
+                self.trap_cd[key] = max(0.0, self.trap_cd[key] - dt)
+        active, _ = trap_phase(self.time)
+        if not active:
+            return
+        targets = (self.p, self.b) if self.map.get("trap") else ()
+        for f in targets:
+            if f.dead or not f.on_ground or self.trap_cd["p" if f is self.p else "b"] > 0:
+                continue
+            hit = False
+            if trap == "spikes":
+                hit = f.x < WALL + TRAP_ZONE or f.x > W - WALL - TRAP_ZONE
+            elif trap == "saw":
+                sx = WALL + 40 + (W - 2 * WALL - 80) * ((self.time / TRAP_CYCLE) % 1.0)
+                hit = abs(f.x - sx) < 44
+            elif trap == "flame":
+                for i in range(4):
+                    if (i + int(self.time / TRAP_CYCLE)) % 2 == 0 and abs(f.x - (260 + i * 340)) < 36:
+                        hit = True
+                        break
+            if hit:
+                self.trap_hit(f)
+
+    def trap_hit(self, f):
+        dmg = random.uniform(*TRAP_DMG)
+        f.take_damage(dmg, kb_dir=-1 if f.x > W / 2 else 1, kb_force=260)
+        f.bleed_t = 4.0
+        f.bleed_dps = TRAP_BLEED
+        self.parts.blood(f.x, f.y - 80 * f.scale, 6, 0, big=True)
+        self.parts.dmg_text(f.x, f.y - 180 * f.scale, dmg, color=COL_BLOOD)
+        self.shake = max(self.shake, 6)
+        self.snd("trap")
+        if f is self.p:
+            self.stats["traps"] = self.stats.get("traps", 0) + 1
 
     def netfx(self, x, y, color):
         if self.net:
@@ -513,14 +622,24 @@ class Arena:
             self.fat_anim_t += dt
 
     def register_hit(self, att, foe, base, heavy=False, kb_force=None, stun=0.0, force_crit=False,
-                     pierce_guard=False, bleed=0.0):
+                     pierce_guard=False, bleed=0.0, zone=None, hit_y=None):
         if foe.dead:
             return "miss", 0.0
+        if zone is None and hit_y is not None:
+            top = foe.bbox()[1]
+            span = max(1.0, foe.y - top)
+            frac = (foe.y - hit_y) / span
+            zone = "head" if frac >= 0.62 else ("legs" if frac <= 0.30 else "body")
+        zone = zone or "body"
         if force_crit:
             dmg = base * att.dmg_factor() * att.out_mult() * CRIT_MULT
             crit = True
         else:
             dmg, crit = att.roll_damage(base)
+        if zone == "head":
+            dmg *= ZONE_HEAD
+        elif zone == "legs":
+            dmg *= ZONE_LEGS
         if att.buffs["riposte"] > 0:
             dmg *= RIPOSTE_MULT
             att.buffs["riposte"] = 0.0
@@ -531,6 +650,9 @@ class Arena:
         if res == "parry":
             if foe is self.p:
                 self.stats["parries"] += 1
+            else:
+                self.set_say(dialogue.pick(dialogue.TAUNT_ON_PARRY), foe)
+            self.snd("parry")
             att.stun_t = max(att.stun_t, PARRY_STUN)
             att.attack_t = 0.0
             foe.buffs["riposte"] = RIPOSTE_DUR
@@ -560,6 +682,14 @@ class Arena:
                 self.stats["bleeds"] += 1
                 self.parts.dmg_text(foe.x, foe.y - 210 * foe.scale, 0, txt="\u041a\u0420\u041e\u0412\u041e\u0422\u041e\u0427\u0415\u041d\u0418\u0415",
                                     color="#ff2a1a")
+        if zone == "head":
+            foe.stun_t = max(foe.stun_t, ZONE_HEAD_STUN)
+            if att is self.p:
+                self.stats["headshots"] = self.stats.get("headshots", 0) + 1
+            self.parts.dmg_text(foe.x, foe.y - 230 * foe.scale, 0, txt="В ГОЛОВУ", color="#ffdf6a")
+        elif zone == "legs":
+            foe.slow_t = max(foe.slow_t, 0.9)
+            self.parts.dmg_text(foe.x, foe.y - 120 * foe.scale, 0, txt="ПО НОГАМ", color="#b0baf0")
         if att is self.p:
             self.dmg_dealt += dmg
         if self.net:
@@ -570,12 +700,14 @@ class Arena:
             self.parts.splat(foe.x, GROUND_Y, 3)
         self.roll_injury(att, foe, heavy or crit)
         if crit:
+            self.snd("crit")
             self.parts.burst(foe.x - foe.facing * 12, foe.y - 95 * foe.scale, "#fff2b0", 14, 260)
             self.parts.dmg_text(foe.x, foe.y - 185 * foe.scale, dmg, color="#ff5a1a", big=True)
             self.parts.ring(foe.x, foe.y - 95 * foe.scale, "#ff5a1a", 10, 60, 0.3)
             self.shake = max(self.shake, 10)
             self.hitstop = max(self.hitstop, 0.12)
         else:
+            self.snd("heavy" if heavy else "hit")
             self.parts.burst(foe.x - foe.facing * 12, foe.y - 95 * foe.scale, "#ffd23f", 10, 220)
             self.parts.dmg_text(foe.x, foe.y - 170 * foe.scale, dmg, big=heavy)
             self.shake = max(self.shake, 7 if heavy else 5)
@@ -604,7 +736,7 @@ class Arena:
         if a_top > b1 or att.y < b0:
             return
         self.register_hit(att, foe, att.melee_damage(stage), heavy=stage >= 2,
-                          kb_force=COMBO_KB[min(stage, 2)])
+                          kb_force=COMBO_KB[min(stage, 2)], hit_y=att.y - 96 * att.scale)
 
     def strike_in_range(self, att, foe, rng, ytol=165):
         dx = (foe.x - att.x) * att.facing
@@ -621,26 +753,30 @@ class Arena:
         if att is self.p:
             self.stats["strikes"] += 1
         if kind == "kick":
+            self.snd("kick")
             rng = MELEE_RANGE * 1.15 * att.scale
             if self.strike_in_range(att, foe, rng):
                 self.register_hit(att, foe, random.uniform(10, 15) * COMBO_MULT[min(stage, 2)],
-                                  kb_force=560, pierce_guard=True)
+                                  kb_force=560, pierce_guard=True, hit_y=att.y - 62 * att.scale)
                 self.parts.ring(foe.x, foe.y - 90 * foe.scale, att.h["accent"], 8, 44, 0.25)
         elif kind == "upper":
+            self.snd("uppercut")
             rng = MELEE_RANGE * 0.9 * att.scale
             if self.strike_in_range(att, foe, rng):
                 res, dmg = self.register_hit(att, foe, random.uniform(14, 20) * COMBO_MULT[min(stage, 2)],
-                                             kb_force=200, force_crit=True, pierce_guard=True)
+                                             kb_force=200, force_crit=True, pierce_guard=True,
+                                             hit_y=att.y - 150 * att.scale)
                 if res == "hit":
                     foe.vy = -760.0
                     foe.on_ground = False
                 self.parts.ring(foe.x, foe.y - 120 * foe.scale, "#ffd23f", 8, 60, 0.3)
                 self.shake = max(self.shake, 8)
         elif kind == "sweep":
+            self.snd("sweep")
             rng = MELEE_RANGE * 1.05 * att.scale
             if self.strike_in_range(att, foe, rng, ytol=90):
                 res, dmg = self.register_hit(att, foe, random.uniform(8, 12) * COMBO_MULT[min(stage, 2)],
-                                             kb_force=140)
+                                             kb_force=140, zone="legs")
                 if res == "hit":
                     foe.root_t = max(foe.root_t, 0.6)
                     self.parts.dmg_text(foe.x, foe.y - 200 * foe.scale, 0, txt="ПОДСЕЧКА",
@@ -648,11 +784,11 @@ class Arena:
         elif kind == "air":
             if self.strike_in_range(att, foe, 130 * att.scale, ytol=260):
                 self.register_hit(att, foe, random.uniform(9, 14) * COMBO_MULT[min(stage, 2)],
-                                  kb_force=380)
+                                  kb_force=380, hit_y=att.y - 90 * att.scale)
         else:
             if self.strike_in_range(att, foe, 170 * att.scale, ytol=260):
                 self.register_hit(att, foe, random.uniform(11, 16) * COMBO_MULT[min(stage, 2)],
-                                  heavy=True, kb_force=420)
+                                  heavy=True, kb_force=420, hit_y=att.y - 70 * att.scale)
                 self.shake = max(self.shake, 9)
 
     def roll_injury(self, att, foe, big):
@@ -751,6 +887,9 @@ class Arena:
         f.cds[idx] = ab["cd"]
         if f is self.p:
             self.stats["casts"] += 1
+        else:
+            self.set_say(dialogue.pick(dialogue.BOSS_CAST if self.boss else dialogue.TAUNT_ON_CAST), f)
+        self.snd("cast")
         self.netfx(f.x, f.y - 90 * f.scale, f.h["glow"])
         return True
 
@@ -1046,7 +1185,7 @@ class Arena:
                     pr["x"] += pr["vx"] * dt
                     pr["traveled"] += abs(pr["vx"] * dt)
                     if not foe.dead and foe.buffs["soul"] <= 0 and self.circ_hit(pr, foe, 26):
-                        self.register_hit(pr["owner"], foe, pr["dmg"])
+                        self.register_hit(pr["owner"], foe, pr["dmg"], hit_y=pr["y"])
                         self.parts.burst(pr["x"], pr["y"], "#cfd6dd", 10, 200)
                         pr["phase"] = "hold"
                         pr["timer"] = 3.0
@@ -1071,7 +1210,7 @@ class Arena:
                     pr["x"] += dxx / dd * sp
                     pr["y"] += dyy / dd * sp
                     if not foe.dead and foe.buffs["soul"] <= 0 and self.circ_hit(pr, foe, 24):
-                        self.register_hit(pr["owner"], foe, pr["dmg"] * 0.7)
+                        self.register_hit(pr["owner"], foe, pr["dmg"] * 0.7, hit_y=pr["y"])
             else:
                 pr["x"] += pr["vx"] * dt
                 pr["y"] += pr.get("vy", 0.0) * dt
@@ -1081,7 +1220,7 @@ class Arena:
                 if random.random() < dt * 40:
                     self.parts.trail(pr["x"], pr["y"] + random.uniform(-6, 6), pr["color"])
                 if not foe.dead and foe.buffs["soul"] <= 0 and self.circ_hit(pr, foe, pr["r"] + 14):
-                    self.register_hit(pr["owner"], foe, pr["dmg"])
+                    self.register_hit(pr["owner"], foe, pr["dmg"], hit_y=pr["y"])
                     if pr["kind"] == "snare":
                         foe.root_t = max(foe.root_t, pr["dur"])
                         self.parts.ring(foe.x, foe.y - 10, pr["color"], 14, 52, 0.35)
@@ -1938,6 +2077,18 @@ class Arena:
             cv.create_rectangle(W / 2 - 218, 642, W / 2 - 218 + int(436 * frac), 652,
                                 fill=COL_RED if frac < 0.35 else COL_GOLD, outline="", tags=("dyn",))
 
+    def draw_dialogue(self, cv):
+        if not self.say or self.say_t <= 0:
+            return
+        who, text = self.say
+        name = who.h["name"] if who is not None else ""
+        col = "#ff2a8a" if who is self.b else COL_GOLD
+        x0, x1 = W / 2 - 460, W / 2 + 460
+        y0, y1 = 596, 668
+        cv.create_rectangle(x0, y0, x1, y1, fill="#160607", outline=col, width=2, tags=("dyn",))
+        cv.create_text(x0 + 14, y0 + 16, text=name, anchor="w", fill=col, font=F_SMALL, tags=("dyn",))
+        cv.create_text(W / 2, y0 + 46, text="«%s»" % text, fill="#e8c9a0", font=F_SMALL, tags=("dyn",))
+
     def draw_fracture(self, cv, f, ox, oy):
         kind = f.injury["kind"]
         yy = {"str": -120, "spd": -55, "jump": -70, "ability": -160}.get(kind, -90)
@@ -1985,6 +2136,7 @@ class Arena:
                 txt = "РАУНД %d" % self.round if self.phase_t > 0.6 else "БОЙ!"
             col = COL_GOLD if self.phase_t > 0.6 else COL_RED
             self.banner(cv, txt, col)
+            self.draw_dialogue(cv)
         elif self.phase == "ko":
             self.banner(cv, "НОКАУТ!", COL_RED)
         elif self.phase == "fatality":
@@ -2010,6 +2162,11 @@ class Arena:
                 if getattr(self, "max_combo", 0) >= 2:
                     cv.create_text(W / 2, 470, text="Макс. комбо: %d" % self.max_combo,
                                    font=F_SMALL, fill=COL_GEM, tags=("dyn",))
+                fg = getattr(self, "frag_gains", None)
+                if fg:
+                    cv.create_text(W / 2, 500, text="Фрагменты: " +
+                                   ", ".join(NATURE_LABEL.get(n, n) for n in fg),
+                                   font=F_SMALL, fill="#bfe9d0", tags=("dyn",))
             else:
                 t1 = "ПОБЕДА!" if self.win else "ПОРАЖЕНИЕ"
                 cv.create_text(W / 2, 295, text=t1, font=F_HUGE,
