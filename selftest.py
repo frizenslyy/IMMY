@@ -78,7 +78,7 @@ def main():
             ks = tuple(sorted(ab["kind"] for ab in h["abilities"]))
             assert ks not in kinds, (k, ks, kinds.get(ks))
             kinds[ks] = k
-    assert len(kinds) == 10
+    assert len(kinds) == 15
     print("common kind-sets unique ok")
 
     a = Arena("LIGHTY", "DEADY", 10, True)
@@ -599,7 +599,7 @@ def main():
     assert [x["id"] for x in granted] == ["w1", "w5"], granted
     assert d["coins"] == 150 and "w1" in d["ach"] and "w5" in d["ach"]
     assert ach_mod.check(d) == []
-    assert len(ach_mod.ACHIEVEMENTS) == 191, len(ach_mod.ACHIEVEMENTS)
+    assert len(ach_mod.ACHIEVEMENTS) == 250, len(ach_mod.ACHIEVEMENTS)
     n_gem = sum(1 for a in ach_mod.ACHIEVEMENTS if a.get("gems"))
     assert n_gem > 40, n_gem
     d2 = save_mod.default_save()
@@ -608,15 +608,15 @@ def main():
     granted2 = ach_mod.check(d2)
     assert ga["id"] in [x["id"] for x in granted2]
     assert d2["gems"] == ga["gems"] and d2["stats"]["gems_earned"] == ga["gems"]
-    print("achievements 191 + gems grant ok")
+    print("achievements 250 + gems grant ok")
 
-    assert sum(c["stages"] for c in camp_mod.CAMPAIGNS) == 305
-    assert len(camp_mod.CAMPAIGNS) == 23
+    assert sum(c["stages"] for c in camp_mod.CAMPAIGNS) == 525
+    assert len(camp_mod.CAMPAIGNS) == 38
     assert camp_mod.stage_level(0, 1) == 1 and camp_mod.stage_level(0, 10) == 13
     assert camp_mod.is_final(0, 10) and not camp_mod.is_final(0, 9)
     hero_rewards = [c for c in camp_mod.CAMPAIGNS if c["reward"]["type"] == "hero"]
     gem_rewards = [c for c in camp_mod.CAMPAIGNS if c["reward"]["type"] == "gems"]
-    assert len(hero_rewards) == 6 and len(gem_rewards) == 8
+    assert len(hero_rewards) == 11 and len(gem_rewards) == 13
     assert all(camp_mod.reward_label(c) for c in camp_mod.CAMPAIGNS)
     d = save_mod.default_save()
     assert camp_mod.unlocked(0, d) and not camp_mod.unlocked(1, d)
@@ -790,9 +790,9 @@ def main():
 
     from immy.config import (CHEST_HELL_COST, COUNTDOWN_T, MARTYR_DMG_MULT,
                              MARTYR_HP_MULT, MARTYR_ROUNDS)
-    assert MARTYR_ROUNDS == 10 and MARTYR_HP_MULT == 10.0 and MARTYR_DMG_MULT == 10.0
+    assert MARTYR_ROUNDS == 10 and MARTYR_HP_MULT == 30.0 and MARTYR_DMG_MULT == 10.0
     a = Arena("DEADY", "LIGHTY", 1, False, martyr=True)
-    assert a.martyr and a.b.max_hp == 1000.0 and a.b.dmg_mult == 10.0
+    assert a.martyr and a.b.max_hp == 3000.0 and a.b.dmg_mult == 10.0
     a.phase = "fight"
     a.b.hp = 1.0
     a.register_hit(a.p, a.b, 50)
@@ -858,22 +858,22 @@ def main():
         a.update(1 / 60, dict(EMPTY_INP))
     print("new ability kinds ok")
 
-    assert len(camp_mod.CAMPAIGNS) == 23
-    assert sum(c["stages"] for c in camp_mod.CAMPAIGNS) == 305
+    assert len(camp_mod.CAMPAIGNS) == 38
+    assert sum(c["stages"] for c in camp_mod.CAMPAIGNS) == 525
     assert camp_mod.is_final(22, 16) and not camp_mod.is_final(22, 15)
-    print("campaigns 23 ok")
+    print("campaigns 38 ok")
 
-    assert len(ach_mod.ACHIEVEMENTS) == 191
+    assert len(ach_mod.ACHIEVEMENTS) == 250
     ids = [a["id"] for a in ach_mod.ACHIEVEMENTS]
-    assert len(set(ids)) == 191
-    print("achievements 191 ok")
+    assert len(set(ids)) == 250
+    print("achievements 250 ok")
 
     from immy import artifacts as art_mod
     from immy.artifacts import (ARTIFACTS, ART_BY_ID, NATURES, artifact_buffs,
-                                can_craft, hero_nature)
-    assert len(ARTIFACTS) == 30 and len(ART_BY_ID) == 30
+                                can_craft, craft_cost_label, hero_nature)
+    assert len(ARTIFACTS) == 75 and len(ART_BY_ID) == 75
     for art in ARTIFACTS:
-        assert art["nature"] in NATURES and art["tier"] in (1, 2, 3)
+        assert art["nature"] in NATURES and art["tier"] in (1, 2, 3, 4)
         assert art["buff"] and sum(art["cost"].values()) >= 2
     assert hero_nature("DEADY") == "dark"
     buffs = artifact_buffs("DEADY", ["dusk_veil", "night_fang"])
@@ -884,7 +884,15 @@ def main():
     assert can_craft(ART_BY_ID["ember_charm"], {"fire": 2}, 0)
     assert not can_craft(ART_BY_ID["ember_charm"], {"fire": 1}, 0)
     assert not can_craft(ART_BY_ID["molten_plate"], {"fire": 9}, 2)
-    print("artifacts 30 ok")
+    bp_art = next(x for x in ARTIFACTS if x.get("bps"))
+    bp_frags = dict(bp_art["cost"])
+    assert can_craft(bp_art, bp_frags, bp_art["gems"], bps={bp_art["id"]: 1})
+    assert not can_craft(bp_art, bp_frags, bp_art["gems"], bps={})
+    assert can_craft(bp_art, bp_frags, bp_art["gems"])
+    assert "РИСУНОК 1/1" in craft_cost_label(bp_art, {bp_art["id"]: 1})
+    assert "РИСУНОК" in craft_cost_label(bp_art)
+    assert sum(1 for x in ARTIFACTS if x.get("bps")) == 15
+    print("artifacts 75 + blueprints ok")
 
     from immy.config import ZONE_HEAD, ZONE_LEGS
     a = Arena("DEADY", "LIGHTY", 1, False, map=MAPS[0], sfx=None)
@@ -909,7 +917,7 @@ def main():
     print("zones ok")
 
     trap_maps = [m for m in MAPS if m.get("trap")]
-    assert len(MAPS) == 30 and len(trap_maps) >= 10
+    assert len(MAPS) == 35 and len(trap_maps) >= 20
     from immy.background import trap_phase
     act1, _ = trap_phase(0.5)
     act2, _ = trap_phase(4.0)
@@ -922,7 +930,7 @@ def main():
     at.update_traps(1 / 60)
     if trap_maps[0]["trap"] == "spikes":
         assert at.p.hp < hp0, (at.p.hp, hp0)
-    print("arenas 30 + traps ok")
+    print("arenas 35 + traps ok")
 
     from immy import dialogue as dlg_mod
     for pool in (dlg_mod.BOSS_INTRO, dlg_mod.ROUND2, dlg_mod.BOT_WIN,
@@ -965,7 +973,7 @@ def main():
     print("artifact buffs on fighter ok")
 
     d = save_mod.default_save()
-    assert "settings" in d and "frags" in d and "arts" in d and "equip" in d
+    assert "settings" in d and "frags" in d and "arts" in d and "equip" in d and "bps" in d
     assert d["settings"]["mute"] is False and 0.0 <= d["settings"]["music"] <= 1.0
     print("save schema ok")
 

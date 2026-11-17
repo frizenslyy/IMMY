@@ -47,6 +47,8 @@ COMBO_KB = (240.0, 300.0, 420.0)
 PARRY_WINDOW = 0.2
 PARRY_CD = 1.2
 PARRY_STUN = 0.1
+PARRY_PERFECT = 0.12
+PARRY_STUN_PERFECT = 0.45
 CRIT_MULT = 1.8
 
 KICK_CD = 1.0
@@ -65,7 +67,7 @@ RIPOSTE_DUR = 0.9
 RIPOSTE_MULT = 1.3
 CURSE_MULT = 0.7
 MARTYR_ROUNDS = 10
-MARTYR_HP_MULT = 10.0
+MARTYR_HP_MULT = 30.0
 MARTYR_DMG_MULT = 10.0
 MARTYR_GEMS = 100
 MARTYR_COIN_PER_DMG = 2
@@ -88,9 +90,9 @@ ULT_LEFT = 4.0
 ULT_RANGE_Y = 200
 FINISHER_BONUS = 25
 
-RARITY_POWER = {"standard": 1.0, "common": 1.0, "uncommon": 1.06,
-                "exclusive": 1.10, "epic": 1.13, "mythic": 1.20, "devil": 1.28,
-                "legendary": 1.35}
+RARITY_POWER = {"standard": 1.0, "common": 1.0, "uncommon": 1.10,
+                "exclusive": 1.16, "epic": 1.22, "mythic": 1.32, "devil": 1.42,
+                "legendary": 1.45}
 
 FATALITY_WINDOW = 4.5
 FATALITY_BONUS = 150
@@ -115,6 +117,9 @@ TRAP_ACTIVE = 1.6
 TRAP_DMG = (8, 15)
 TRAP_BLEED = 2.0
 TRAP_ZONE = 120
+TRAP_XS = (320, 640, 960, 1280)
+CRUSHER_XS = (512, 1088)
+RING_XS = (520, 1080)
 
 ART_SLOTS = 3
 NATURE_MATCH_BONUS = 0.07

@@ -11,8 +11,8 @@ from .config import (COMBO_KB, COMBO_MULT, COL_BLOOD, COL_DEEPRED, COL_DARK, COL
                      FATALITY_GEMS, FATALITY_KEYS, FATALITY_TXT, FATALITY_WINDOW, F_BIG, F_HUGE, F_MID,
                      F_SMALL, F_TINY, GROUND_Y, H, INJURY_CHANCE, LEGEND_FOE_HP, MARTYR_COIN_PER_DMG,
                      MARTYR_DMG_MULT, MARTYR_GEMS, MARTYR_HP_MULT, MARTYR_ROUNDS, MELEE_RANGE,
-                     MYTH_ENERGY, MYTH_FOE_HP, PARRY_CD, PARRY_STUN, RIPOSTE_DUR, RIPOSTE_MULT,
-                     RARITY_POWER, THORNS_PCT, TRAP_BLEED, TRAP_CYCLE, TRAP_DMG, TRAP_ZONE, ULT_CHARGE_MAX,
+                     MYTH_ENERGY, MYTH_FOE_HP, PARRY_CD, PARRY_STUN, PARRY_STUN_PERFECT, RIPOSTE_DUR, RIPOSTE_MULT,
+                     RARITY_POWER, THORNS_PCT, TRAP_ACTIVE, TRAP_BLEED, TRAP_CYCLE, CRUSHER_XS, RING_XS, TRAP_DMG, TRAP_XS, TRAP_ZONE, ULT_CHARGE_MAX,
                      ULT_HP, ULT_LEFT, ULT_QUALITY, ULT_RANGE_Y, W, WALL, ZONE_BODY, ZONE_HEAD,
                      ZONE_HEAD_STUN, ZONE_LEGS)
 from . import dialogue
@@ -175,6 +175,8 @@ class Arena:
                              "curse": 0.0, "thorns": 0.0, "riposte": 0.0}
             fighter.soul_target = None
             fighter.parry_t = fighter.parry_cd = fighter.parry_flash = 0.0
+            fighter.parry_perfect = False
+            fighter.force_crit_hits = 0
             fighter.root_t = 0.0
             fighter.poison_t = fighter.poison_dps = fighter.poison_tick = 0.0
             fighter.bleed_t = fighter.bleed_dps = fighter.bleed_tick = 0.0
@@ -214,7 +216,7 @@ class Arena:
                 self.martyr_gems = MARTYR_GEMS
                 self.phase = "end"
                 self.phase_t = 1e9
-            elif self.wins_b >= 1 or self.round >= MARTYR_ROUNDS:
+            elif self.wins_b >= MARTYR_ROUNDS or self.round >= MARTYR_ROUNDS * 3:
                 self.win = False
                 self.reward = int(self.dmg_dealt * MARTYR_COIN_PER_DMG)
                 self.phase = "end"
@@ -528,6 +530,28 @@ class Arena:
                     if (i + int(self.time / TRAP_CYCLE)) % 2 == 0 and abs(f.x - (260 + i * 340)) < 36:
                         hit = True
                         break
+            elif trap == "geyser":
+                for i in range(4):
+                    if (i + int(self.time / TRAP_CYCLE)) % 2 == 0 and abs(f.x - TRAP_XS[i]) < 44:
+                        hit = True
+                        break
+            elif trap == "claws":
+                pr = (self.time % TRAP_ACTIVE) / TRAP_ACTIVE
+                idx = int(self.time / TRAP_CYCLE) % 4
+                hit = pr > 0.55 and abs(f.x - TRAP_XS[idx]) < 48
+            elif trap == "tesla":
+                idx = int(self.time / TRAP_CYCLE) % 4
+                hit = abs(f.x - TRAP_XS[idx]) < 56
+            elif trap == "crusher":
+                pr = (self.time % TRAP_ACTIVE) / TRAP_ACTIVE
+                hit = pr > 0.55 and any(abs(f.x - cx) < 50 for cx in CRUSHER_XS)
+            elif trap == "ring":
+                for i in range(2):
+                    if (i + int(self.time / TRAP_CYCLE)) % 2 == 0:
+                        rx = W / 2 + (260 if i == 0 else -260) * math.sin(self.time * 0.9 + i * math.pi)
+                        if abs(f.x - rx) < 34:
+                            hit = True
+                            break
             if hit:
                 self.trap_hit(f)
 
@@ -656,6 +680,9 @@ class Arena:
             frac = (foe.y - hit_y) / span
             zone = "head" if frac >= 0.62 else ("legs" if frac <= 0.30 else "body")
         zone = zone or "body"
+        if not force_crit and getattr(att, "force_crit_hits", 0) > 0:
+            att.force_crit_hits -= 1
+            force_crit = True
         if force_crit:
             dmg = base * att.dmg_factor() * att.out_mult() * CRIT_MULT
             crit = True
@@ -673,11 +700,26 @@ class Arena:
         res = foe.take_damage(dmg, kb_dir=att.facing, stun=stun, kb_force=kb_force,
                               pierce_guard=pierce_guard)
         if res == "parry":
+            perfect = getattr(foe, "parry_perfect", False)
             if foe is self.p:
                 self.stats["parries"] += 1
             elif self.boss:
                 self.set_say(dialogue.pick(dialogue.TAUNT_ON_PARRY), foe)
             self.snd("parry")
+            if perfect:
+                att.stun_t = max(att.stun_t, PARRY_STUN_PERFECT)
+                foe.force_crit_hits = getattr(foe, "force_crit_hits", 0) + 1
+                foe.energy = min(100.0, foe.energy + 18.0)
+                self.hitstop = max(self.hitstop, 0.22)
+                self.parts.ring(foe.x, foe.y - 95 * foe.scale, "#fff2b0", 14, 86, 0.45)
+                self.parts.burst(foe.x, foe.y - 95 * foe.scale, "#ffd23f", 18, 300)
+                self.parts.dmg_text(foe.x, foe.y - 225 * foe.scale, 0,
+                                    txt="ИДЕАЛЬНОЕ ПАРИРОВАНИЕ",
+                                    color="#fff2b0", big=True)
+                self.shake = max(self.shake, 9)
+                if foe is self.p:
+                    self.snd("crit")
+                return res, 0.0
             att.stun_t = max(att.stun_t, PARRY_STUN)
             att.attack_t = 0.0
             foe.buffs["riposte"] = RIPOSTE_DUR
@@ -1956,23 +1998,23 @@ class Arena:
         self.hp_bar(cv, 100, 460, self.p, True)
         self.hp_bar(cv, W - 560, 460, self.b, False)
         if self.p.injury:
-            cv.create_text(104, 100, text=self.INJURY_TXT[self.p.injury["kind"]], anchor="w",
+            cv.create_text(104, 116, text=self.INJURY_TXT[self.p.injury["kind"]], anchor="w",
                            font=F_TINY, fill=COL_BLOOD, tags=("dyn",))
         if self.b.injury:
-            cv.create_text(W - 104, 100, text=self.INJURY_TXT[self.b.injury["kind"]], anchor="e",
+            cv.create_text(W - 104, 116, text=self.INJURY_TXT[self.b.injury["kind"]], anchor="e",
                            font=F_TINY, fill=COL_BLOOD, tags=("dyn",))
         efrac = clamp(self.p.energy / 100.0, 0.0, 1.0)
-        cv.create_rectangle(103, 70, 557, 84, fill="#160404", outline="#5a1c10", width=2, tags=("dyn",))
+        cv.create_rectangle(142, 70, 557, 84, fill="#160404", outline="#5a1c10", width=2, tags=("dyn",))
         if efrac > 0:
-            cv.create_rectangle(106, 73, 106 + int(448 * efrac), 81, fill=COL_GOLD, outline="", tags=("dyn",))
+            cv.create_rectangle(145, 73, 145 + int(409 * efrac), 81, fill=COL_GOLD, outline="", tags=("dyn",))
         cv.create_text(554, 77, text="ЭНЕРГИЯ", anchor="e", font=F_TINY,
                        fill="#5a1c10" if efrac > 0.85 else "#a1700a", tags=("dyn",))
         ufrac = clamp(self.p.ult_charge / ULT_CHARGE_MAX, 0.0, 1.0)
         ufull = ufrac >= 1.0
         ucol = "#ff2a8a" if ufull else "#8a2a5a"
-        cv.create_rectangle(103, 90, 557, 100, fill="#160404", outline="#5a1c10", width=1, tags=("dyn",))
+        cv.create_rectangle(142, 90, 557, 100, fill="#160404", outline="#5a1c10", width=1, tags=("dyn",))
         if ufrac > 0:
-            cv.create_rectangle(105, 92, 105 + int(450 * ufrac), 98, fill=ucol, outline="", tags=("dyn",))
+            cv.create_rectangle(144, 92, 144 + int(411 * ufrac), 98, fill=ucol, outline="", tags=("dyn",))
         cv.create_text(554, 95, text="УЛЬТА", anchor="e", font=F_TINY,
                        fill="#ff9aff" if ufull else "#a1700a", tags=("dyn",))
         for i in range(0 if self.survival else 2):
@@ -1988,10 +2030,10 @@ class Arena:
             lvl_txt = "МУЧЕНИК · РАУНД %d/%d" % (self.round, MARTYR_ROUNDS)
         else:
             lvl_txt = ("БОСС · УР. %d" if self.boss else "БОТ · УР. %d") % self.level
-        cv.create_text(W - 60, 110, text=lvl_txt, anchor="e", font=F_MID,
+        cv.create_text(W - 60, 138, text=lvl_txt, anchor="e", font=F_MID,
                        fill="#ff2a1a" if (self.boss or (self.survival and self.mini)) else COL_ORANGE, tags=("dyn",))
-        cv.create_oval(44, 74, 62, 92, fill=COL_GOLD, outline="#a1700a", width=2, tags=("dyn",))
-        cv.create_text(70, 83, text=str(coins), anchor="w", fill=COL_GOLD, font=F_MID, tags=("dyn",))
+        cv.create_oval(44, H - 52, 62, H - 34, fill=COL_GOLD, outline="#a1700a", width=2, tags=("dyn",))
+        cv.create_text(70, H - 43, text=str(coins), anchor="w", fill=COL_GOLD, font=F_MID, tags=("dyn",))
         n_ab = len(self.p.h["abilities"])
         total = (n_ab + 3) * 66 - 6
         x0 = W // 2 - total // 2

@@ -1,4 +1,4 @@
-"""IMMY — кампании: 23 кампании для новичков и профи, награды: герои, монеты, самоцветы."""
+"""IMMY — кампании: 38 кампаний для новичков и профи, награды: герои, монеты, самоцветы."""
 
 CAMPAIGNS = [
     {"name": "АРЕНЫ НОВИЧКА", "desc": "Первые шаги бойца: 10 лёгких ступеней.",
@@ -47,6 +47,41 @@ CAMPAIGNS = [
      "stages": 16, "base": 46, "step": 3.0, "reward": {"type": "gems"}, "color": "#ffc400"},
     {"name": "ИСПЫТАНИЕ БЕССМЕРТНЫХ", "desc": "Лишь боги выйдут: 16 ступеней.",
      "stages": 16, "base": 50, "step": 3.2, "reward": {"type": "coins"}, "color": "#fff2b0"},
+]
+
+
+# ===== 8.0: +15 campaigns =====
+CAMPAIGNS += [
+    {"name": "РУННЫЕ ШАХТЫ", "desc": "Шахты архивариуса: 12 ступеней рун.",
+     "stages": 12, "base": 54, "step": 3.2, "reward": {"type": "hero", "hero": "RUNEY"}, "color": "#ffe95a"},
+    {"name": "ИСКРА НЕБЕС", "desc": "Молнии сияют: 12 ступеней.",
+     "stages": 12, "base": 57, "step": 3.2, "reward": {"type": "gems"}, "color": "#5ab4ff"},
+    {"name": "СЕРДЦЕ ВУЛКАНА", "desc": "Магма и молнии: 13 ступеней.",
+     "stages": 13, "base": 60, "step": 3.3, "reward": {"type": "coins"}, "color": "#ff5a1a"},
+    {"name": "ТЕНИ ЖНЕЦА", "desc": "Клинки осколков: 13 ступеней.",
+     "stages": 13, "base": 63, "step": 3.3, "reward": {"type": "hero", "hero": "SHARDY"}, "color": "#9fe0ff"},
+    {"name": "ЛЕДЯНОЙ ТРОН", "desc": "Окова вечного льда: 14 ступеней.",
+     "stages": 14, "base": 66, "step": 3.4, "reward": {"type": "gems"}, "color": "#dff3ff"},
+    {"name": "КЛАДБИЩЕ ТЕНЕЙ", "desc": "Тени не спят: 14 ступеней.",
+     "stages": 14, "base": 69, "step": 3.4, "reward": {"type": "coins"}, "color": "#5a646e"},
+    {"name": "ГНЕЗДО ВЫРОДКОВ", "desc": "Трясина гнилого роя: 14 ступеней.",
+     "stages": 14, "base": 72, "step": 3.5, "reward": {"type": "coins"}, "color": "#8a8a2a"},
+    {"name": "ПОРОГ ВЕЧНОСТИ", "desc": "Империя пепла: 15 ступеней.",
+     "stages": 15, "base": 75, "step": 3.5, "reward": {"type": "hero", "hero": "EMPERORY"}, "color": "#d99a2a"},
+    {"name": "СУД НЕБЕС", "desc": "Небесное приговор: 15 ступеней.",
+     "stages": 15, "base": 78, "step": 3.5, "reward": {"type": "gems"}, "color": "#fff2b0"},
+    {"name": "ШЛЕМ РАГНАРЁКА", "desc": "Битва богов: 15 ступеней.",
+     "stages": 15, "base": 81, "step": 3.6, "reward": {"type": "coins"}, "color": "#ff5a1a"},
+    {"name": "ВЕЧНОЕ ЗАТМЕНИЕ", "desc": "Тень солнца: 16 ступеней.",
+     "stages": 16, "base": 84, "step": 3.6, "reward": {"type": "hero", "hero": "ECLIPSY"}, "color": "#7a4ae0"},
+    {"name": "ХРЕБЕТ АБИССА", "desc": "Голос бездны: 16 ступеней.",
+     "stages": 16, "base": 87, "step": 3.6, "reward": {"type": "gems"}, "color": "#6a4ad9"},
+    {"name": "СИЯНИЕ СЕРАФИМА", "desc": "Небесный страж: 16 ступеней.",
+     "stages": 16, "base": 90, "step": 3.7, "reward": {"type": "hero", "hero": "SERAPHY"}, "color": "#ffffff"},
+    {"name": "УЗЕЛ ПУСТОТЫ", "desc": "Грань реальности: 17 ступеней.",
+     "stages": 17, "base": 94, "step": 3.7, "reward": {"type": "coins"}, "color": "#9a5cff"},
+    {"name": "ПОСЛЕДНИЙ ШАГ БОГА", "desc": "Финал всех дорог: 18 ступеней.",
+     "stages": 18, "base": 98, "step": 3.7, "reward": {"type": "gems"}, "color": "#ffc400"},
 ]
 
 UNLOCK_PLVL = 1
