@@ -318,7 +318,7 @@ class Arena:
                 self.parts.blood(fx, foe.y - 90 * foe.scale, 6, self.p.facing, big=True)
                 self.parts.ring(fx, fy, COL_GOLD, 10, 70, 0.3)
                 foe.kvx += self.p.facing * 120
-                self.shake = max(self.shake, 12)
+                self.shake = max(self.shake, 6)
                 self.hitstop = max(self.hitstop, 0.08)
                 self.snd("crit")
         elif t < 1.6:
@@ -507,7 +507,7 @@ class Arena:
             self.shake = 8
             self.hitstop = 0.14
             self.slow_t = 0.8
-            self.flash_t = max(self.flash_t, 0.15)
+            self.flash_t = max(self.flash_t, 0.07)
             self.phase = "ko"
             self.phase_t = 1.8
             self.snd("ko")
@@ -520,7 +520,7 @@ class Arena:
             self.shake = 8
             self.hitstop = 0.14
             self.slow_t = 0.8
-            self.flash_t = max(self.flash_t, 0.15)
+            self.flash_t = max(self.flash_t, 0.07)
             self.phase = "ko"
             self.phase_t = 1.8
             self.snd("ko")
@@ -758,8 +758,6 @@ class Arena:
             return res, 0.0
         if res != "hit":
             return res, 0.0
-        if crit and self.flash_t < 0.08:
-            self.flash_t = 0.08
         if foe.buffs["thorns"] > 0 and att is not foe and abs(att.x - foe.x) < 230:
             ref = dmg * THORNS_PCT
             att.hp = max(0.0, att.hp - ref)
@@ -795,7 +793,7 @@ class Arena:
             self.parts.burst(foe.x - foe.facing * 12, foe.y - 95 * foe.scale, "#fff2b0", 14, 260)
             self.parts.dmg_text(foe.x, foe.y - 185 * foe.scale, dmg, color="#ff5a1a", big=True)
             self.parts.ring(foe.x, foe.y - 95 * foe.scale, "#ff5a1a", 10, 60, 0.3)
-            self.shake = max(self.shake, 10)
+            self.shake = max(self.shake, 5)
             self.hitstop = max(self.hitstop, 0.12)
         else:
             self.snd("heavy" if heavy else "hit")
@@ -933,7 +931,7 @@ class Arena:
         if f is self.p:
             self.stats["legend_ults"] += 1
         self.netfx(f.x, f.y - 90 * f.scale, "#ffc400")
-        self.shake = max(self.shake, 12)
+        self.shake = max(self.shake, 6)
         self.parts.ring(f.x, f.y - 90 * f.scale, "#ffc400", 18, 160, 0.6)
         self.parts.burst(f.x, f.y - 90 * f.scale, "#ffd23f", 26, 340)
         return True
@@ -954,7 +952,7 @@ class Arena:
         if f is self.p:
             self.stats["myth_ults"] += 1
         self.netfx(f.x, f.y - 90 * f.scale, "#ff2a8a")
-        self.shake = max(self.shake, 10)
+        self.shake = max(self.shake, 5)
         self.parts.ring(f.x, f.y - 90 * f.scale, "#ff2a8a", 16, 130, 0.5)
         self.parts.burst(f.x, f.y - 90 * f.scale, "#ff2a8a", 20, 300)
         return True
@@ -981,10 +979,10 @@ class Arena:
                         "x": foe.x, "y": foe.y - 90 * foe.scale})
         if f is self.p:
             self.stats["supreme_ults"] += 1
-        self.flash_t = max(self.flash_t, 0.2)
+        self.flash_t = max(self.flash_t, 0.07)
         self.snd("supreme")
         self.netfx(f.x, f.y - 90 * f.scale, "#ffefd0")
-        self.shake = max(self.shake, 14)
+        self.shake = max(self.shake, 7)
         self.parts.ring(f.x, f.y - 90 * f.scale, "#ffefd0", 18, 170, 0.7)
         self.parts.burst(f.x, f.y - 90 * f.scale, "#fff2d0", 30, 380)
         return True
@@ -1463,7 +1461,7 @@ class Arena:
                         self.parts.burst(foe.x, foe.y - 90 * foe.scale, fx["owner"].h["glow"], 30, 380)
                         self.parts.blood(foe.x, foe.y - 100 * foe.scale, 10, fx["owner"].facing, big=True)
                         self.parts.dmg_text(foe.x, foe.y - 205 * foe.scale, dmg, color="#ff2a8a", big=True)
-                        self.shake = max(self.shake, 14)
+                        self.shake = max(self.shake, 7)
                         self.hitstop = max(self.hitstop, 0.18)
                 if fx["t"] <= 0:
                     self.fx.remove(fx)
@@ -1483,7 +1481,7 @@ class Arena:
                             self.parts.dmg_text(foe.x, foe.y - 200 * foe.scale, 0,
                                                 txt="ДОБИВАНИЕ!", color=COL_GOLD, big=True)
                             self.parts.burst(foe.x, foe.y - 90 * foe.scale, fx["owner"].h["glow"], 26, 340)
-                            self.shake = max(self.shake, 12)
+                            self.shake = max(self.shake, 6)
                             self.hitstop = max(self.hitstop, 0.2)
                         else:
                             foe.hp = min(foe.hp, ULT_LEFT)
@@ -1590,9 +1588,9 @@ class Arena:
                         self.parts.burst(foe.x, foe.y - 90 * foe.scale, "#ffefd0", 42, 460)
                         self.parts.blood(foe.x, foe.y - 100 * foe.scale, 14, fx["owner"].facing, big=True)
                         self.parts.dmg_text(foe.x, foe.y - 215 * foe.scale, dmg, color="#ffefd0", big=True)
-                        self.shake = max(self.shake, 18)
+                        self.shake = max(self.shake, 7)
                         self.hitstop = max(self.hitstop, 0.26)
-                        self.flash_t = max(self.flash_t, 0.25)
+                        self.flash_t = max(self.flash_t, 0.09)
                 if fx["t"] <= 0:
                     self.fx.remove(fx)
                 continue
@@ -1618,7 +1616,7 @@ class Arena:
                         self.parts.burst(foe.x, foe.y - 90 * foe.scale, "#ffd23f", 34, 420)
                         self.parts.blood(foe.x, foe.y - 100 * foe.scale, 12, fx["owner"].facing, big=True)
                         self.parts.dmg_text(foe.x, foe.y - 215 * foe.scale, dmg, color="#ffc400", big=True)
-                        self.shake = max(self.shake, 16)
+                        self.shake = max(self.shake, 8)
                         self.hitstop = max(self.hitstop, 0.22)
                 if fx["t"] <= 0:
                     self.fx.remove(fx)
@@ -1634,7 +1632,7 @@ class Arena:
                         self.register_hit(fx["owner"], foe, fx["dmg"], heavy=True, kb_force=380)
                         self.parts.burst(fx["x"], GROUND_Y - 70, fx.get("color", "#ff8c1a"), 24, 320)
                         self.parts.splat(foe.x, GROUND_Y, 4)
-                        self.shake = max(self.shake, 10)
+                        self.shake = max(self.shake, 5)
                 fx["kind"] = "meteor"
                 fx["t"] = 0.5
             elif k == "hand_warn":
@@ -2280,7 +2278,7 @@ class Arena:
         cv.create_oval(x - 3, y - 3, x + 3, y + 3, fill=COL_BLOOD, outline="", tags=("dyn",))
 
     def draw(self, cv, coins):
-        sh = self.shake
+        sh = self.shake * 0.5
         ox = random.uniform(-sh, sh) if sh > 0.5 else 0.0
         oy = random.uniform(-sh, sh) if sh > 0.5 else 0.0
         cv.delete("dyn")
@@ -2309,8 +2307,7 @@ class Arena:
         cv.create_rectangle(W - 28, 0, W, H, fill="#000000", stipple="gray12", outline="", tags=("dyn",))
 
         if self.flash_t > 0:
-            a = "gray75" if self.flash_t > 0.12 else ("gray50" if self.flash_t > 0.05 else "gray25")
-            cv.create_rectangle(0, 0, W, H, fill="#ffffff", stipple=a, outline="", tags=("dyn",))
+            cv.create_rectangle(0, 0, W, H, fill="#ffffff", stipple="gray25", outline="", tags=("dyn",))
 
         if self.p.buffs["soul"] > 0 or self.b.buffs["soul"] > 0:
             cv.create_rectangle(0, 0, W, H, fill="#1a0a2a", stipple="gray25", outline="", tags=("dyn",))
