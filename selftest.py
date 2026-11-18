@@ -873,7 +873,6 @@ def main():
     assert len(set(ids)) == 250
     print("achievements 250 ok")
 
-    from immy import artifacts as art_mod
     from immy.artifacts import (ARTIFACTS, ART_BY_ID, NATURES, artifact_buffs,
                                 can_craft, craft_cost_label, hero_nature)
     assert len(ARTIFACTS) == 75 and len(ART_BY_ID) == 75
