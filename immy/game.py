@@ -124,6 +124,8 @@ class Game(tk.Tk):
         except Exception:
             pass
         self.title(TITLE)
+        self.configure(bg="#120406")
+        self._vs = (1.0, 0.0, 0.0)
         self.geometry("%dx%d" % (W, H))
         self.resizable(False, False)
         self.cv = tk.Canvas(self, width=W, height=H, bg="#120406", highlightthickness=0)
@@ -222,6 +224,10 @@ class Game(tk.Tk):
             self.preview.y = GROUND_Y - 19
         else:
             self.preview = None
+        s_i, tx_i, ty_i = self._vs
+        if s_i != 1.0 or tx_i or ty_i:
+            self.cv.scale("bg", 0, 0, s_i, s_i)
+            self.cv.move("bg", tx_i, ty_i)
 
     def persist(self):
         self.save["coins"] = self.coins
@@ -479,16 +485,23 @@ class Game(tk.Tk):
     def on_key_release(self, e):
         self.keys.discard(norm_key(e))
 
+    def _ev_xy(self, e):
+        s, tx, ty = self._vs
+        if s != 1.0 or tx or ty:
+            return ((e.x - tx) / s, (e.y - ty) / s)
+        return (e.x, e.y)
+
     def on_motion(self, e):
-        self.mouse = (e.x, e.y)
+        self.mouse = self._ev_xy(e)
 
     def on_click(self, e):
+        mx, my = self._ev_xy(e)
         if self.state == "fight":
             if self.arena is None:
                 return
             if self.arena.phase == "end":
                 for x0, y0, x1, y1, action in self.buttons:
-                    if x0 <= e.x <= x1 and y0 <= e.y <= y1:
+                    if x0 <= mx <= x1 and y0 <= my <= y1:
                         try:
                             action()
                         except Exception:
@@ -501,7 +514,7 @@ class Game(tk.Tk):
                 self.events.add("attack")
             return
         for x0, y0, x1, y1, action in self.buttons:
-            if x0 <= e.x <= x1 and y0 <= e.y <= y1:
+            if x0 <= mx <= x1 and y0 <= my <= y1:
                 self.sfx.play("click")
                 try:
                     action()
@@ -944,14 +957,30 @@ class Game(tk.Tk):
         try:
             self.attributes("-fullscreen", fs)
             self.resizable(not fs, not fs)
-            if fs:
-                self.geometry("%dx%d+0+0" % (W, H))
-                self.cv.place(relx=0.5, rely=0.5, anchor="center")
+            sw = self.winfo_screenwidth()
+            sh = self.winfo_screenheight()
+            if fs and sw and sh:
+                s = min(sw / float(W), sh / float(H))
+                self.geometry("%dx%d+0+0" % (sw, sh))
+                self.cv.config(width=sw, height=sh)
+                self.cv.place(x=0, y=0)
+                self._vs = (s, (sw - W * s) / 2.0, (sh - H * s) / 2.0)
             else:
+                self.cv.config(width=W, height=H)
                 self.cv.place(x=0, y=0)
                 self.geometry(self._home_geom)
+                self._vs = (1.0, 0.0, 0.0)
         except Exception:
-            pass
+            return
+        self.set_state(self.state)
+
+    def _apply_vs(self, cv):
+        s, tx, ty = self._vs
+        if s != 1.0 or tx or ty:
+            cv.scale("all", 0, 0, s, s)
+            cv.move("all", tx, ty)
+            cv.move("bg", -tx, -ty)
+            cv.scale("bg", 0, 0, 1.0 / s, 1.0 / s)
 
     def draw_mode(self):
         cv = self.cv
@@ -1903,6 +1932,7 @@ class Game(tk.Tk):
                         self.ui.button(cv, W / 2 - 280, 610, W / 2 - 40, 670, "РЕВАНШ", self.start_fight, font=F_SMALL)
                         self.ui.button(cv, W / 2 + 40, 610, W / 2 + 280, 670, "В МЕНЮ", self.goto_menu, font=F_SMALL)
         self.draw_toasts(cv)
+        self._apply_vs(cv)
 
 
 def clamp01(v):
