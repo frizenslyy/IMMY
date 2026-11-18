@@ -51,9 +51,9 @@ def main():
         total = sum(h["stats"].values())
         lo, hi = {"standard": (14, 14), "common": (14, 14), "uncommon": (17, 17),
                   "epic": (16, 20), "exclusive": (17, 17), "mythic": (18, 22),
-                  "devil": (24, 24), "legendary": (20, 22)}[h["rarity"]]
+                  "devil": (24, 24), "legendary": (20, 22), "supreme": (24, 26)}[h["rarity"]]
         assert lo <= total <= hi, (hero, total, lo, hi)
-        n_ab_want = 3 if h["rarity"] in ("standard", "common") else (5 if h["rarity"] == "legendary" else 4)
+        n_ab_want = 3 if h["rarity"] in ("standard", "common") else (5 if h["rarity"] in ("legendary", "supreme") else 4)
         assert len(h["abilities"]) == n_ab_want, hero
         assert h["rarity"] in RARITY_LABEL
         for ab in h["abilities"]:
@@ -64,6 +64,8 @@ def main():
             assert h["abilities"][-1]["kind"] == "myth_ult", hero
         if h["rarity"] == "legendary":
             assert h["abilities"][-1]["kind"] == "legend_ult", hero
+        if h["rarity"] == "supreme":
+            assert h["abilities"][-1]["kind"] == "supreme_ult", hero
         assert h.get("pros") and h.get("cons"), hero
         a = Arena(hero, "EMBERY" if hero != "EMBERY" else "DEADY", 1, False)
         assert a.map in MAPS
@@ -351,7 +353,7 @@ def main():
     for key in HEROES:
         h = HEROES[key]
         sps = h.get("specials", [])
-        want = 4 if h["rarity"] in ("mythic", "devil", "legendary") else \
+        want = 4 if h["rarity"] in ("mythic", "devil", "legendary", "supreme") else \
             (3 if h["rarity"] in ("uncommon", "epic", "exclusive") else 2)
         assert len(sps) == want, (key, len(sps))
         combos = [sp["combo"] for sp in sps]
@@ -374,16 +376,16 @@ def main():
     a.p.energy = 100.0
     a.b.x = a.p.x + 120
     assert a.cast_special(a.p, "as", a.b)
-    assert a.b.root_t > 0 and abs(a.p.energy - 50) < 1e-6 and a.p.special_cd > 0
-    assert any(fx["kind"] == "grab" for fx in a.fx)
-    for _ in range(40):
+    assert abs(a.p.energy - 40) < 1e-6 and a.p.special_cd > 0
+    for _ in range(60):
         a.update(1 / 60, dict(EMPTY_INP))
     assert a.b.hp < a.b.max_hp
-    print("deady grab ok")
+    print("deady vortex special ok")
 
     e = a.p.energy
     assert not a.cast_special(a.p, "ws", a.b)
     assert a.p.energy == e
+    assert not a.cast_special(a.p, "as", a.b)
     print("special energy gate ok")
 
     a = Arena("EMBERY", "DEADY", 2, False)
@@ -610,13 +612,16 @@ def main():
     assert d2["gems"] == ga["gems"] and d2["stats"]["gems_earned"] == ga["gems"]
     print("achievements 250 + gems grant ok")
 
-    assert sum(c["stages"] for c in camp_mod.CAMPAIGNS) == 525
-    assert len(camp_mod.CAMPAIGNS) == 38
+    assert sum(c["stages"] for c in camp_mod.CAMPAIGNS) == 630
+    assert len(camp_mod.CAMPAIGNS) == 43
     assert camp_mod.stage_level(0, 1) == 1 and camp_mod.stage_level(0, 10) == 13
     assert camp_mod.is_final(0, 10) and not camp_mod.is_final(0, 9)
     hero_rewards = [c for c in camp_mod.CAMPAIGNS if c["reward"]["type"] == "hero"]
     gem_rewards = [c for c in camp_mod.CAMPAIGNS if c["reward"]["type"] == "gems"]
-    assert len(hero_rewards) == 11 and len(gem_rewards) == 13
+    bp_rewards = [c for c in camp_mod.CAMPAIGNS if c["reward"]["type"] == "blueprint"]
+    assert len(hero_rewards) == 18 and len(gem_rewards) == 12 and len(bp_rewards) == 5
+    hero_dupe = [r["hero"] for r in (c["reward"] for c in hero_rewards)]
+    assert len(set(hero_dupe)) == len(hero_dupe)
     assert all(camp_mod.reward_label(c) for c in camp_mod.CAMPAIGNS)
     d = save_mod.default_save()
     assert camp_mod.unlocked(0, d) and not camp_mod.unlocked(1, d)
@@ -858,10 +863,10 @@ def main():
         a.update(1 / 60, dict(EMPTY_INP))
     print("new ability kinds ok")
 
-    assert len(camp_mod.CAMPAIGNS) == 38
-    assert sum(c["stages"] for c in camp_mod.CAMPAIGNS) == 525
+    assert len(camp_mod.CAMPAIGNS) == 43
+    assert sum(c["stages"] for c in camp_mod.CAMPAIGNS) == 630
     assert camp_mod.is_final(22, 16) and not camp_mod.is_final(22, 15)
-    print("campaigns 38 ok")
+    print("campaigns 43 ok")
 
     assert len(ach_mod.ACHIEVEMENTS) == 250
     ids = [a["id"] for a in ach_mod.ACHIEVEMENTS]

@@ -41,6 +41,7 @@ if errorlevel 1 (
 
 echo [3/3] Сборка exe...
 python -m PyInstaller --onefile --noconsole --name IMMY ^
+    --icon "%~dp0assets\icon.ico" ^
     --hidden-import tkinter --hidden-import winsound ^
     main.py
 if errorlevel 1 (

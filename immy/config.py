@@ -61,6 +61,7 @@ INJURY_CHANCE = 0.04
 MYTH_ENERGY = 100
 MYTH_FOE_HP = 0.25
 LEGEND_FOE_HP = 0.30
+SUPREME_FOE_HP = 0.35
 ULT_CHARGE_MAX = 100.0
 THORNS_PCT = 0.30
 RIPOSTE_DUR = 0.9
@@ -92,7 +93,9 @@ FINISHER_BONUS = 25
 
 RARITY_POWER = {"standard": 1.0, "common": 1.0, "uncommon": 1.10,
                 "exclusive": 1.16, "epic": 1.22, "mythic": 1.32, "devil": 1.42,
-                "legendary": 1.45}
+                "legendary": 1.45, "supreme": 1.55}
+
+WIN_MODES = ("windowed", "boxed", "fullscreen")
 
 FATALITY_WINDOW = 4.5
 FATALITY_BONUS = 150
