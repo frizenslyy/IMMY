@@ -2026,6 +2026,7 @@ class Game(tk.Tk):
             self.draw_net_select()
         elif st == "fight":
             if self.arena is not None:
+                self.arena.shake_on = bool(self.save.get("settings", {}).get("shake", True))
                 self.arena.draw(cv, self.coins + (self.arena.run_reward if self.arena.survival else 0))
                 draw_traps(cv, self.arena.time, self.arena.map)
                 draw_ambient(cv, time.time(), self.arena.map)
