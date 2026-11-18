@@ -425,6 +425,8 @@ class Fighter:
         R(l2 - 7, hip + leg_h // 2 - 3, l2 + 7, hip + leg_h // 2 + 3, accent)
 
         R(-19, shoulder + bob, 19, hip, body)
+        cv.create_oval(X - 20 * s, Y + (shoulder - 3 + bob) * s, X + 20 * s, Y + (hip + 2 + bob) * s,
+                       fill=body, outline="", tags=("dyn",), **kw)
         R(-19, hip - 8 + bob, 19, hip, accent)
         R(-19, shoulder + bob, 19, shoulder + 12 + bob, body2)
         R(-5, shoulder + 18 + bob, 5, shoulder + 30 + bob, accent)
@@ -476,9 +478,12 @@ class Fighter:
             R(15, shoulder + 36 + bob, 26, shoulder + 43 + bob, bone)
             R(-26, shoulder + 36 + bob, -15, shoulder + 43 + bob, bone)
 
-        R(-27, shoulder - 3 + bob, -13, shoulder + 9 + bob, accent)
-        R(13, shoulder - 3 + bob, 27, shoulder + 9 + bob, accent)
-        R(-14, head_t + bob, 14, head_b + bob, body)
+        cv.create_oval(X - 27 * s, Y + (shoulder - 3 + bob) * s, X - 12 * s, Y + (shoulder + 10 + bob) * s,
+                       fill=accent, outline="", tags=("dyn",), **kw)
+        cv.create_oval(X + 12 * s, Y + (shoulder - 3 + bob) * s, X + 27 * s, Y + (shoulder + 10 + bob) * s,
+                       fill=accent, outline="", tags=("dyn",), **kw)
+        cv.create_oval(X - 13 * s, Y + (head_t - 2 + bob) * s, X + 13 * s, Y + (head_b + 2 + bob) * s,
+                       fill=body, outline="", tags=("dyn",), **kw)
 
         style = C["style"]
         if style == "hood":

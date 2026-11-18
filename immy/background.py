@@ -257,8 +257,8 @@ def draw_trap_static(cv, m):
         for side in (0, W):
             x = 6 if side == 0 else W - 6
             sgn = 1 if side == 0 else -1
-            for i in range(6):
-                sy = GROUND_Y - 40 - i * 44
+            for i in range(4):
+                sy = GROUND_Y - 34 - i * 48
                 cv.create_polygon(x, sy + 34, x, sy, x + sgn * 26, sy + 17,
                                   fill="#3a1410", outline="#5a2418", tags=("bg",))
     elif trap == "saw":
@@ -310,8 +310,8 @@ def draw_traps(cv, time_now, m):
             x = 6 if side == 0 else W - 6
             sgn = 1 if side == 0 else -1
             ext = 30 if active else 8
-            for i in range(6):
-                sy = GROUND_Y - 40 - i * 44
+            for i in range(4):
+                sy = GROUND_Y - 34 - i * 48
                 cv.create_polygon(x, sy + 34, x, sy - ext, x + sgn * ext, sy + 17 - ext / 2,
                                   fill="#c9b8a8" if active else "#5a4a3a", outline="#e8d8c8" if active else "",
                                   tags=("dyn",))

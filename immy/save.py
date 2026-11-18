@@ -3,7 +3,7 @@
 
 import json
 
-from .config import ART_SLOTS, MUSIC_VOL, SAVE_FILE, SFX_VOL
+from .config import ART_SLOTS, MUSIC_VOL, SAVE_FILE, SFX_VOL, WIN_MODES
 from .heroes import HEROES, STANDARD_KEYS
 
 DEFAULT_STATS = {"wins": 0, "bosses": 0, "waves": 0, "specials": 0, "ults": 0,
@@ -12,10 +12,11 @@ DEFAULT_STATS = {"wins": 0, "bosses": 0, "waves": 0, "specials": 0, "ults": 0,
                  "myth_ults": 0, "chests": 0, "gems_earned": 0, "fatalities": 0,
                  "online_wins": 0, "martyr_wins": 0, "max_damage": 0, "casts": 0,
                  "bleeds": 0, "chains": 0, "saws": 0, "roars": 0, "aoes": 0,
-                 "haze": 0, "legend_ults": 0, "crafts": 0, "traps": 0, "headshots": 0}
+                 "haze": 0, "legend_ults": 0, "crafts": 0, "traps": 0, "headshots": 0,
+                 "supreme_ults": 0, "fair_wins": 0}
 
 DEFAULT_SETTINGS = {"music": MUSIC_VOL, "sfx": SFX_VOL, "mute": False,
-                    "shake": True, "blood": True, "fullscreen": False}
+                    "shake": True, "blood": True, "win_mode": "windowed"}
 
 
 def default_save():
@@ -60,7 +61,11 @@ def load_save():
         s["mute"] = bool(settings.get("mute", False))
         s["shake"] = bool(settings.get("shake", True))
         s["blood"] = bool(settings.get("blood", True))
-        s["fullscreen"] = bool(settings.get("fullscreen", False))
+        wm = settings.get("win_mode")
+        if wm in WIN_MODES:
+            s["win_mode"] = wm
+        elif settings.get("fullscreen"):
+            s["win_mode"] = "fullscreen"
     frags = raw.get("frags", {})
     if isinstance(frags, dict):
         d["frags"] = {str(k): max(0, int(v)) for k, v in frags.items()}

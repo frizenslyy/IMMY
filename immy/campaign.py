@@ -1,4 +1,4 @@
-"""IMMY — кампании: 38 кампаний для новичков и профи, награды: герои, монеты, самоцветы."""
+"""IMMY — кампании: 43 кампании для новичков и профи, награды: герои, чертежи артефактов, монеты, самоцветы."""
 
 CAMPAIGNS = [
     {"name": "АРЕНЫ НОВИЧКА", "desc": "Первые шаги бойца: 10 лёгких ступеней.",
@@ -20,7 +20,7 @@ CAMPAIGNS = [
     {"name": "ПУСТОТА МЕЖДУ МИРАМИ", "desc": "Разлом реальности: 13 ступеней бездны.",
      "stages": 13, "base": 12, "step": 2.0, "reward": {"type": "gems"}, "color": "#9a5cff"},
     {"name": "КУЗНЯ БОГОВ", "desc": "Наковальня титанов: 14 ступеней жара.",
-     "stages": 14, "base": 14, "step": 2.1, "reward": {"type": "coins"}, "color": "#ffcf6a"},
+     "stages": 14, "base": 14, "step": 2.1, "reward": {"type": "hero", "hero": "HORIZONY"}, "color": "#ffcf6a"},
     {"name": "БЕЗДНА", "desc": "Царство мёртвых душ: 14 ступеней отчаяния.",
      "stages": 14, "base": 16, "step": 2.2, "reward": {"type": "hero", "hero": "NECROMANCERY"}, "color": "#4ad16a"},
     {"name": "ЗВЁЗДНЫЙ РАЗЛОМ", "desc": "Хаос созвездий: 15 ступеней безумия.",
@@ -38,15 +38,15 @@ CAMPAIGNS = [
     {"name": "ГРОЗОВОЙ ФРОНТ", "desc": "Буря не умолкает: 14 ступеней.",
      "stages": 14, "base": 33, "step": 2.6, "reward": {"type": "gems"}, "color": "#5ab4d9"},
     {"name": "ЦИТАДЕЛЬ БУРИ", "desc": "Обитель ветров: 14 ступеней.",
-     "stages": 14, "base": 36, "step": 2.7, "reward": {"type": "coins"}, "color": "#bfe9ff"},
+     "stages": 14, "base": 36, "step": 2.7, "reward": {"type": "hero", "hero": "VERTIGY"}, "color": "#bfe9ff"},
     {"name": "ПРОКЛЯТЫЕ ЗВЕЗДЫ", "desc": "Звезды мертвцов: 15 ступеней.",
      "stages": 15, "base": 39, "step": 2.8, "reward": {"type": "gems"}, "color": "#e04aff"},
     {"name": "КОЛЕСО ПУСТОТЫ", "desc": "Вращение бездны: 15 ступеней.",
-     "stages": 15, "base": 42, "step": 2.9, "reward": {"type": "coins"}, "color": "#9a5cff"},
+     "stages": 15, "base": 42, "step": 2.9, "reward": {"type": "hero", "hero": "CATALYSTY"}, "color": "#9a5cff"},
     {"name": "ТРОН ВСЕЛЕННОЙ", "desc": "Престол миров: 16 ступеней.",
-     "stages": 16, "base": 46, "step": 3.0, "reward": {"type": "gems"}, "color": "#ffc400"},
+     "stages": 16, "base": 46, "step": 3.0, "reward": {"type": "hero", "hero": "MONARCHY"}, "color": "#ffc400"},
     {"name": "ИСПЫТАНИЕ БЕССМЕРТНЫХ", "desc": "Лишь боги выйдут: 16 ступеней.",
-     "stages": 16, "base": 50, "step": 3.2, "reward": {"type": "coins"}, "color": "#fff2b0"},
+     "stages": 16, "base": 50, "step": 3.2, "reward": {"type": "hero", "hero": "PARADOXY"}, "color": "#fff2b0"},
 ]
 
 
@@ -65,7 +65,7 @@ CAMPAIGNS += [
     {"name": "КЛАДБИЩЕ ТЕНЕЙ", "desc": "Тени не спят: 14 ступеней.",
      "stages": 14, "base": 69, "step": 3.4, "reward": {"type": "coins"}, "color": "#5a646e"},
     {"name": "ГНЕЗДО ВЫРОДКОВ", "desc": "Трясина гнилого роя: 14 ступеней.",
-     "stages": 14, "base": 72, "step": 3.5, "reward": {"type": "coins"}, "color": "#8a8a2a"},
+     "stages": 14, "base": 72, "step": 3.5, "reward": {"type": "blueprint", "bps": 2}, "color": "#8a8a2a"},
     {"name": "ПОРОГ ВЕЧНОСТИ", "desc": "Империя пепла: 15 ступеней.",
      "stages": 15, "base": 75, "step": 3.5, "reward": {"type": "hero", "hero": "EMPERORY"}, "color": "#d99a2a"},
     {"name": "СУД НЕБЕС", "desc": "Небесное приговор: 15 ступеней.",
@@ -79,9 +79,23 @@ CAMPAIGNS += [
     {"name": "СИЯНИЕ СЕРАФИМА", "desc": "Небесный страж: 16 ступеней.",
      "stages": 16, "base": 90, "step": 3.7, "reward": {"type": "hero", "hero": "SERAPHY"}, "color": "#ffffff"},
     {"name": "УЗЕЛ ПУСТОТЫ", "desc": "Грань реальности: 17 ступеней.",
-     "stages": 17, "base": 94, "step": 3.7, "reward": {"type": "coins"}, "color": "#9a5cff"},
+     "stages": 17, "base": 94, "step": 3.7, "reward": {"type": "blueprint", "bps": 3}, "color": "#9a5cff"},
     {"name": "ПОСЛЕДНИЙ ШАГ БОГА", "desc": "Финал всех дорог: 18 ступеней.",
      "stages": 18, "base": 98, "step": 3.7, "reward": {"type": "gems"}, "color": "#ffc400"},
+]
+
+# ===== 9.0: +5 кампаний для сильнейших =====
+CAMPAIGNS += [
+    {"name": "КУЗНЯ ВЕЧНОСТИ", "desc": "Огни, что плавят миры: 18 ступеней.",
+     "stages": 18, "base": 102, "step": 3.8, "reward": {"type": "hero", "hero": "WARDENY"}, "color": "#ff6a1a"},
+    {"name": "ТРОН ОТРАЖЕНИЙ", "desc": "Зеркала крадут лица: 19 ступеней.",
+     "stages": 19, "base": 106, "step": 3.9, "reward": {"type": "blueprint", "bps": 3}, "color": "#c9a0ff"},
+    {"name": "КОЛЕСО РОКА", "desc": "Судьба крутит кости: 20 ступеней.",
+     "stages": 20, "base": 110, "step": 4.0, "reward": {"type": "blueprint", "bps": 4}, "color": "#ff2a8a"},
+    {"name": "ИСПЫТАНИЕ БОГОВ", "desc": "Высший суд пантеона: 22 ступени.",
+     "stages": 22, "base": 114, "step": 4.1, "reward": {"type": "hero", "hero": "SENTINELY"}, "color": "#ffefd0"},
+    {"name": "БЕЗДНА ЗВЁЗД", "desc": "Тьма между светилами: 26 ступеней.",
+     "stages": 26, "base": 118, "step": 4.2, "reward": {"type": "blueprint", "bps": 5}, "color": "#6a4ad9"},
 ]
 
 UNLOCK_PLVL = 1
@@ -117,6 +131,8 @@ def reward_label(camp):
         return "НАГРАДА: ГЕРОЙ " + r["hero"]
     if r["type"] == "gems":
         return "НАГРАДА: САМОЦВЕТЫ"
+    if r["type"] == "blueprint":
+        return "НАГРАДА: ЧЕРТЁЖ АРТЕФАКТА"
     return "НАГРАДА: МОНЕТЫ"
 
 

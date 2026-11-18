@@ -93,7 +93,24 @@ BATTLE_TRACK = (
     150, 0.5,
 )
 
-TRACKS = {"menu": MENU_TRACK, "battle": BATTLE_TRACK}
+BATTLE2_TRACK = (
+    [(_D, 0.5), (_D, 0.25), (None, 0.25), (_D, 0.5), (_F, 0.5), (_G, 1.0),
+     (_F, 0.5), (_D, 0.5), (-3, 1.0), (_C, 0.5), (-3, 0.5), (_D, 1.0),
+     (_G, 0.5), (_G, 0.25), (None, 0.25), (_G, 0.5), (_A + 12, 0.5), (_C + 12, 1.0),
+     (-5, 0.5), (_G, 0.5), (_E, 0.5), (_D, 0.5), (None, 1.0)],
+    [(-3, 1.0), (-3, 1.0), (-8, 1.0), (-10, 1.0), (-5, 1.0), (-5, 1.0), (-1, 1.0), (-2, 1.0)],
+    148, 0.35,
+)
+
+HELL_TRACK = (
+    [(_A, 2.0), (None, 1.0), (-2, 1.5), (-2, 0.5), (_G, 2.0), (None, 1.0), (-4, 1.5), (-4, 0.5),
+     (_D, 2.0), (None, 1.0), (-7, 1.5), (-7, 0.5), (_F, 2.0), (_E, 1.0), (-5, 2.0), (None, 0.5)],
+    [(-24, 2.0), (-24, 1.0), (-12, 1.0), (-24, 2.0), (-19, 1.0), (-12, 1.0),
+     (-26, 2.0), (-26, 1.0), (-14, 1.0), (-24, 1.0), (-17, 1.0), (-12, 1.0)],
+    92, 0.15,
+)
+
+TRACKS = {"menu": MENU_TRACK, "battle": BATTLE_TRACK, "battle2": BATTLE2_TRACK, "hell": HELL_TRACK}
 
 
 def _tone(freq, dur, amp, duty=0.5, slide=0.0, decay=3.0):
@@ -180,6 +197,15 @@ def _render_sfx(name):
                  _tone(-9, 0.35, 0.55, duty=0.4))
     elif name == "combo":
         s = _tone(990, 0.09, 0.5, duty=0.25, slide=5)
+    elif name == "special":
+        s = _mix(_tone(440, 0.14, 0.55, duty=0.2, slide=9, decay=4), _tone(660, 0.12, 0.4, duty=0.2, slide=-4),
+                 _noise(0.08, 0.3, 7))
+    elif name == "supreme":
+        s = _mix(_tone(80, 0.7, 0.9, duty=0.45, slide=23, decay=2), _noise(0.55, 0.65, 3),
+                 _tone(660, 0.5, 0.4, duty=0.15, slide=-12), _tone(1320, 0.35, 0.3, duty=0.1, slide=7))
+    elif name == "door":
+        s = _mix(_tone(140, 0.5, 0.5, duty=0.5, slide=-6, decay=3), _noise(0.45, 0.35, 2.5, lp=0.6),
+                 _tone(220, 0.3, 0.3, duty=0.4, slide=4))
     else:
         s = _tone(440, 0.06, 0.4)
     return _to_wav(s, 1.0)

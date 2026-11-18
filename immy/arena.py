@@ -12,7 +12,7 @@ from .config import (COMBO_KB, COMBO_MULT, COL_BLOOD, COL_DEEPRED, COL_DARK, COL
                      F_SMALL, F_TINY, GROUND_Y, H, INJURY_CHANCE, LEGEND_FOE_HP, MARTYR_COIN_PER_DMG,
                      MARTYR_DMG_MULT, MARTYR_GEMS, MARTYR_HP_MULT, MARTYR_ROUNDS, MELEE_RANGE,
                      MYTH_ENERGY, MYTH_FOE_HP, PARRY_CD, PARRY_STUN, PARRY_STUN_PERFECT, RIPOSTE_DUR, RIPOSTE_MULT,
-                     RARITY_POWER, THORNS_PCT, TRAP_ACTIVE, TRAP_BLEED, TRAP_CYCLE, CRUSHER_XS, RING_XS, TRAP_DMG, TRAP_XS, TRAP_ZONE, ULT_CHARGE_MAX,
+                     RARITY_POWER, SUPREME_FOE_HP, THORNS_PCT, TRAP_ACTIVE, TRAP_BLEED, TRAP_CYCLE, CRUSHER_XS, RING_XS, TRAP_DMG, TRAP_XS, TRAP_ZONE, ULT_CHARGE_MAX,
                      ULT_HP, ULT_LEFT, ULT_QUALITY, ULT_RANGE_Y, W, WALL, ZONE_BODY, ZONE_HEAD,
                      ZONE_HEAD_STUN, ZONE_LEGS)
 from . import dialogue
@@ -50,13 +50,14 @@ def _snap_fighter(f):
 
 class Arena:
     def __init__(self, player_key, bot_key, level, boss, map=None, survival=False, net=False, mirror=False,
-                 martyr=False, sfx=None, equip=None):
+                 martyr=False, fair=False, sfx=None, equip=None):
         self.sfx = sfx
         self.equip = list(equip or [])
         self.level = level
         self.boss = boss
         self.survival = survival
         self.martyr = martyr
+        self.fair = fair
         self.dmg_dealt = 0.0
         self.martyr_gems = 0
         self.net = net or mirror
@@ -99,7 +100,15 @@ class Arena:
         self.b.reaction = max(0.18, 0.55 - level * 0.015)
         self.b.dmg_mult = self.b.base_dmg
         self.b.speed_mult = self.b.base_speed
-        self.ai = BotAI(self.b, level)
+        if self.fair and not self.net:
+            self.b.max_hp = 100.0 * pw * random.uniform(0.92, 1.08)
+            self.b.hp = self.b.disp_hp = self.b.max_hp
+            self.b.base_dmg = 1.1 * pw * random.uniform(0.92, 1.05)
+            self.b.dmg_mult = self.b.base_dmg
+            self.b.base_speed = 1.0 + random.uniform(-0.06, 0.06)
+            self.b.speed_mult = self.b.base_speed
+            self.b.reaction = 0.35
+        self.ai = BotAI(self.b, min(level, 12))
         if martyr:
             self.b.max_hp = 100.0 * MARTYR_HP_MULT
             self.b.hp = self.b.disp_hp = self.b.max_hp
@@ -115,13 +124,15 @@ class Arena:
         self.strikes = []
         self.shake = 0.0
         self.hitstop = 0.0
+        self.flash_t = 0.0
+        self.slow_t = 0.0
         self.combo_count = 0
         self.combo_show = 0.0
         self.max_combo = 0
         self.quality_finish = 0
         self.stats = {"specials": 0, "ults": 0, "parries": 0, "strikes": 0, "injuries": 0, "myth_ults": 0,
                       "casts": 0, "bleeds": 0, "chains": 0, "saws": 0, "roars": 0, "aoes": 0,
-                      "haze": 0, "legend_ults": 0, "headshots": 0, "traps": 0}
+                      "haze": 0, "legend_ults": 0, "supreme_ults": 0, "headshots": 0, "traps": 0}
         self.win = False
         self.reward = 0
         self.rewarded = False
@@ -388,6 +399,10 @@ class Arena:
         self.shake = max(0.0, self.shake - 40 * dt)
         self.combo_show = max(0.0, self.combo_show - dt)
         self.fight_flash = max(0.0, getattr(self, "fight_flash", 0.0) - dt)
+        self.flash_t = max(0.0, self.flash_t - dt)
+        if self.slow_t > 0:
+            self.slow_t -= dt
+            dt *= 0.35
         if self.hitstop > 0:
             self.hitstop -= dt
             self.parts.update(dt * 0.15)
@@ -457,6 +472,9 @@ class Arena:
         self.apply_input(p, inp, b)
         p.update(dt, b, self)
         b.update(dt, p, self)
+        for f in (p, b):
+            if not f.dead and (abs(f.vx) > 320 or (not f.on_ground and abs(f.vy) > 380)):
+                self.parts.trail(f.x, f.y - 90 * f.scale, f.h["glow"])
 
         d = b.x - p.x
         if abs(d) < 56 and not p.dead and not b.dead:
@@ -487,7 +505,9 @@ class Arena:
             self.wins_b += 1
             self.parts.burst(p.x, p.y - 90 * p.scale, p.h["accent"], 26, 280)
             self.shake = 8
-            self.hitstop = 0.12
+            self.hitstop = 0.14
+            self.slow_t = 0.8
+            self.flash_t = max(self.flash_t, 0.15)
             self.phase = "ko"
             self.phase_t = 1.8
             self.snd("ko")
@@ -498,7 +518,9 @@ class Arena:
             self.wins_p += 1
             self.parts.burst(b.x, b.y - 90 * b.scale, b.h["accent"], 26, 280)
             self.shake = 8
-            self.hitstop = 0.12
+            self.hitstop = 0.14
+            self.slow_t = 0.8
+            self.flash_t = max(self.flash_t, 0.15)
             self.phase = "ko"
             self.phase_t = 1.8
             self.snd("ko")
@@ -736,6 +758,8 @@ class Arena:
             return res, 0.0
         if res != "hit":
             return res, 0.0
+        if crit and self.flash_t < 0.08:
+            self.flash_t = 0.08
         if foe.buffs["thorns"] > 0 and att is not foe and abs(att.x - foe.x) < 230:
             ref = dmg * THORNS_PCT
             att.hp = max(0.0, att.hp - ref)
@@ -935,6 +959,36 @@ class Arena:
         self.parts.burst(f.x, f.y - 90 * f.scale, "#ff2a8a", 20, 300)
         return True
 
+    def supreme_ready(self, f, foe):
+        abilities = f.h["abilities"]
+        if len(abilities) < 5 or abilities[4]["kind"] != "supreme_ult":
+            return False
+        return (f.cds[4] <= 0 and f.energy >= 100.0 and f.ult_charge >= ULT_CHARGE_MAX
+                and not foe.dead and foe.buffs["soul"] <= 0
+                and foe.hp / foe.max_hp <= SUPREME_FOE_HP)
+
+    def try_supreme_ult(self, f, foe):
+        if f.dead or f.stun_t > 0 or self.phase != "fight":
+            return False
+        if not self.supreme_ready(f, foe):
+            return False
+        ab = f.h["abilities"][4]
+        f.cds[4] = ab["cd"]
+        f.energy = 0.0
+        f.ult_charge = 0.0
+        self.fx.append({"kind": "supreme_" + f.key.lower(), "owner": f, "foe": foe,
+                        "t": 2.8, "hit_t": 1.7, "applied": False, "dmg": ab.get("dmg", 95),
+                        "x": foe.x, "y": foe.y - 90 * foe.scale})
+        if f is self.p:
+            self.stats["supreme_ults"] += 1
+        self.flash_t = max(self.flash_t, 0.2)
+        self.snd("supreme")
+        self.netfx(f.x, f.y - 90 * f.scale, "#ffefd0")
+        self.shake = max(self.shake, 14)
+        self.parts.ring(f.x, f.y - 90 * f.scale, "#ffefd0", 18, 170, 0.7)
+        self.parts.burst(f.x, f.y - 90 * f.scale, "#fff2d0", 30, 380)
+        return True
+
     def cast_ability(self, f, idx, foe):
         if f.dead or f.stun_t > 0 or self.phase != "fight":
             return False
@@ -947,6 +1001,8 @@ class Arena:
         ab = abilities[idx]
         if ab["kind"] in ("myth_ult", "legend_ult"):
             return False
+        if ab["kind"] == "supreme_ult":
+            return self.try_supreme_ult(f, foe)
         if ab["kind"] == "scythe" and f.scythe_out:
             return False
         if not self.exec_kind(f, ab, foe):
@@ -1509,6 +1565,34 @@ class Arena:
                 fx["t"] -= dt
                 fx["x"] = fx["foe"].x
                 fx["y"] = fx["foe"].y - 90 * fx["foe"].scale
+                if fx["t"] <= 0:
+                    self.fx.remove(fx)
+                continue
+            if k.startswith("supreme_"):
+                fx["t"] -= dt
+                fx["hit_t"] -= dt
+                foe = fx["foe"]
+                fx["x"] = foe.x
+                fx["y"] = foe.y - 90 * foe.scale
+                if fx["hit_t"] <= 0 and not fx["applied"]:
+                    fx["applied"] = True
+                    if not foe.dead and foe.buffs["soul"] <= 0:
+                        dmg, _c = fx["owner"].roll_damage(fx["dmg"])
+                        foe.take_damage(dmg, kb_dir=fx["owner"].facing, stun=2.2,
+                                        kb_force=560, pierce_guard=True)
+                        foe.root_t = max(foe.root_t, 2.0)
+                        if foe.hp / foe.max_hp <= ULT_QUALITY:
+                            foe.hp = 0.0
+                            self.quality_finish += 1
+                            self.parts.dmg_text(foe.x, foe.y - 200 * foe.scale, 0,
+                                                txt="\u0414\u041e\u0411\u0418\u0412\u0410\u041d\u0418\u0415!",
+                                                color=COL_GOLD, big=True)
+                        self.parts.burst(foe.x, foe.y - 90 * foe.scale, "#ffefd0", 42, 460)
+                        self.parts.blood(foe.x, foe.y - 100 * foe.scale, 14, fx["owner"].facing, big=True)
+                        self.parts.dmg_text(foe.x, foe.y - 215 * foe.scale, dmg, color="#ffefd0", big=True)
+                        self.shake = max(self.shake, 18)
+                        self.hitstop = max(self.hitstop, 0.26)
+                        self.flash_t = max(self.flash_t, 0.25)
                 if fx["t"] <= 0:
                     self.fx.remove(fx)
                 continue
@@ -2110,6 +2194,11 @@ class Arena:
             cv.create_text(65, y + 22, text="R", fill=col, font=F_MID, tags=("dyn",))
             cv.create_text(65, y + 44, text=sub, fill="#ff9aff" if rmyth else "#fff2b0",
                            font=F_TINY, tags=("dyn",))
+        elif self.supreme_ready(self.p, self.b):
+            y = 170 + len(specials) * 70 + 8
+            cv.create_rectangle(34, y, 96, y + 62, fill="#2a1808", outline="#ffefd0", width=3, tags=("dyn",))
+            cv.create_text(65, y + 22, text="5", fill="#ffefd0", font=F_MID, tags=("dyn",))
+            cv.create_text(65, y + 44, text="\u0412\u042b\u0421", fill="#ffefd0", font=F_TINY, tags=("dyn",))
         if self.combo_show > 0 and self.combo_count >= 2:
             cv.create_text(W / 2 + 2, 132, text="COMBO x%d" % self.combo_count, font=F_BIG, fill="#2a0503", tags=("dyn",))
             cv.create_text(W / 2, 130, text="COMBO x%d" % self.combo_count, font=F_BIG, fill=COL_GOLD, tags=("dyn",))
@@ -2218,6 +2307,10 @@ class Arena:
         cv.create_rectangle(0, H - 24, W, H, fill="#000000", stipple="gray12", outline="", tags=("dyn",))
         cv.create_rectangle(0, 0, 28, H, fill="#000000", stipple="gray12", outline="", tags=("dyn",))
         cv.create_rectangle(W - 28, 0, W, H, fill="#000000", stipple="gray12", outline="", tags=("dyn",))
+
+        if self.flash_t > 0:
+            a = "gray75" if self.flash_t > 0.12 else ("gray50" if self.flash_t > 0.05 else "gray25")
+            cv.create_rectangle(0, 0, W, H, fill="#ffffff", stipple=a, outline="", tags=("dyn",))
 
         if self.p.buffs["soul"] > 0 or self.b.buffs["soul"] > 0:
             cv.create_rectangle(0, 0, W, H, fill="#1a0a2a", stipple="gray25", outline="", tags=("dyn",))
