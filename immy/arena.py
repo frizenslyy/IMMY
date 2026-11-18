@@ -123,8 +123,8 @@ class Arena:
         self.melee = []
         self.strikes = []
         self.shake = 0.0
+        self.shake_on = True
         self.hitstop = 0.0
-        self.flash_t = 0.0
         self.slow_t = 0.0
         self.combo_count = 0
         self.combo_show = 0.0
@@ -399,7 +399,6 @@ class Arena:
         self.shake = max(0.0, self.shake - 40 * dt)
         self.combo_show = max(0.0, self.combo_show - dt)
         self.fight_flash = max(0.0, getattr(self, "fight_flash", 0.0) - dt)
-        self.flash_t = max(0.0, self.flash_t - dt)
         if self.slow_t > 0:
             self.slow_t -= dt
             dt *= 0.35
@@ -507,7 +506,6 @@ class Arena:
             self.shake = 8
             self.hitstop = 0.14
             self.slow_t = 0.8
-            self.flash_t = max(self.flash_t, 0.07)
             self.phase = "ko"
             self.phase_t = 1.8
             self.snd("ko")
@@ -520,7 +518,6 @@ class Arena:
             self.shake = 8
             self.hitstop = 0.14
             self.slow_t = 0.8
-            self.flash_t = max(self.flash_t, 0.07)
             self.phase = "ko"
             self.phase_t = 1.8
             self.snd("ko")
@@ -979,7 +976,6 @@ class Arena:
                         "x": foe.x, "y": foe.y - 90 * foe.scale})
         if f is self.p:
             self.stats["supreme_ults"] += 1
-        self.flash_t = max(self.flash_t, 0.07)
         self.snd("supreme")
         self.netfx(f.x, f.y - 90 * f.scale, "#ffefd0")
         self.shake = max(self.shake, 7)
@@ -1590,7 +1586,6 @@ class Arena:
                         self.parts.dmg_text(foe.x, foe.y - 215 * foe.scale, dmg, color="#ffefd0", big=True)
                         self.shake = max(self.shake, 7)
                         self.hitstop = max(self.hitstop, 0.26)
-                        self.flash_t = max(self.flash_t, 0.09)
                 if fx["t"] <= 0:
                     self.fx.remove(fx)
                 continue
@@ -2278,7 +2273,7 @@ class Arena:
         cv.create_oval(x - 3, y - 3, x + 3, y + 3, fill=COL_BLOOD, outline="", tags=("dyn",))
 
     def draw(self, cv, coins):
-        sh = self.shake * 0.5
+        sh = self.shake * 0.35 if self.shake_on else 0.0
         ox = random.uniform(-sh, sh) if sh > 0.5 else 0.0
         oy = random.uniform(-sh, sh) if sh > 0.5 else 0.0
         cv.delete("dyn")
@@ -2306,8 +2301,6 @@ class Arena:
         cv.create_rectangle(0, 0, 28, H, fill="#000000", stipple="gray12", outline="", tags=("dyn",))
         cv.create_rectangle(W - 28, 0, W, H, fill="#000000", stipple="gray12", outline="", tags=("dyn",))
 
-        if self.flash_t > 0:
-            cv.create_rectangle(0, 0, W, H, fill="#ffffff", stipple="gray25", outline="", tags=("dyn",))
 
         if self.p.buffs["soul"] > 0 or self.b.buffs["soul"] > 0:
             cv.create_rectangle(0, 0, W, H, fill="#1a0a2a", stipple="gray25", outline="", tags=("dyn",))
